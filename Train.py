@@ -1,23 +1,49 @@
-from abc import ABC, abstractmethod
+import numpy as np
+import torch
+from agents.Agents import Agent
 
 
-class Training(ABC):
-    def __init__(self, verbose=False):
-        self.statistics = None
+class Training():
+    def __init__(
+        self,
+        agent = ,
+        env,
+        verbose=False
+        ):
+        
+        self.statistics: np.ndarray = None
+        self.agent: Agent = None
+        self.env = env
         self.verbose = verbose
 
-    @abstractmethod
-    def train(self, *args, **kwargs):
-        pass
+    
+    def train(self):
+        # set float as default
+        torch.set_default_dtype(torch.float32)
+        
+        if torch.cuda.is_available():
+            print("\nUsing CUDA.")
+            print (torch.version.cuda,"\n")
+        else:
+            print ("\nNot using CUDA.\n")
 
-    @abstractmethod
+        # print hyperparameter settings to console via Agent.printHyper()??
+
+        # for hyperparameter tuning: save model to subfolder where the subfolder name specifies hyperparameter used
+
+        optimizer = optim.Adam(policy_net.parameters(), self.agent.Hyperparameters["lr"])
+
+        obs, info = env.reset()
+        
+
+    
     def plot(self, *args, **kwargs):
         pass
 
-    @abstractmethod
+    
     def train_self_play(self, *args, **kwargs):
         pass
 
-    @abstractmethod
+    
     def save(self, *args, **kwargs):
         pass
