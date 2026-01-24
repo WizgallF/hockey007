@@ -1,23 +1,59 @@
 import numpy as np
-import hockey.hockey_env as h_env
 import gymnasium as gym
-from Train import Training
-from agents.Agents import Agent
+import hockey.hockey_env as h_env
 import time 
+from Train import Training
+from agents.AgentBaseclass import Agent
+from agents.RainbowAgent import RainbowAgent
+from Wrapper import Envwrapper, DiscreteActionWrapperPendulum, DiscreteActionWrapperHockey
+
 
 
 class Core:
     def load_agent(self):
         pass
 
+    
     def train_agent(
             self, 
-            agent: Agent = None, 
-            env: gym.envs = None, 
-            save_intermediate_agents: bool = False):
-        train_class = Training(env, agent)
+            agent_name: str = None, 
+            env_name: str = None, 
+            base_dir = "experiments",
+            save_intermediate_agents: bool = False,
+            verbose=False,
+            bins = 5):
+        
+        print(agent_name)
+        
+        if env_name == "Pendulum-v1":
+            env = gym.make(env_name)
+            env = DiscreteActionWrapperPendulum(env, bins)
+            n_actions = env.action_space.n
+            state, info = env.reset()
+            n_observations = len(state)
+            
+        elif env_name == "Hockey-One-v0":
+            env = gym.envs.make("Hockey-One-v0", mode=0, weak_opponent=True)
+            #env = h_env.HockeyEnv(mode=h_env.Mode.TRAIN_SHOOTING)
+            env = DiscreteActionWrapperHockey(env)
+            n_actions = env.action_space.n
+            state, info = env.reset()
+            n_observations = len(state)
+
+        
+
+        if agent_name == "rainbow": 
+            agent = RainbowAgent(
+                n_observations,
+                n_actions,
+                verbose)
+        else:
+            raise NotImplementedError
+        
+
+        
+        train_class = Training(agent, env, base_dir, save_intermediate_agents, verbose)
         train_class.train()
-        pass
 
     def evaluate(self):
         pass
@@ -66,3 +102,6 @@ class Core:
             if key in {"weakopp", "weakopponent"}:
                 return h_env.BasicOpponent(weak=True)
         return player
+    
+
+

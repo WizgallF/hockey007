@@ -1,0 +1,10 @@
+numpy
+torch
+torchvision
+gymnasium[box2d]
+matplotlib
+PyYAML
+platform
+
+# hockey-env needs to be installed from a specific source:
+# git+https://github.com/martius-lab/hockey-env.git

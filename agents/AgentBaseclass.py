@@ -9,7 +9,7 @@ import numpy as np
 class Agent(ABC):
     @abstractmethod
     def act(
-        state: np.ndarray
+        obs: np.ndarray
         ) -> np.ndarray:
         """
         Docstring for act
@@ -17,10 +17,11 @@ class Agent(ABC):
     
     @abstractmethod
     def observe(
-        state: np.ndarray, 
-        action: np.ndarray, 
-        reward: int, 
-        done: bool):
+        self,
+        state, 
+        action, 
+        reward, 
+        next_state):
         """
         Docstring for observe
         """
