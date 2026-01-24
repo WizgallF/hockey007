@@ -69,8 +69,8 @@ class Training():
                 next_state, reward, terminated, truncated, _ = self.env.step(action)
 
 
-                if terminated:
-                    next_state = None
+                """if terminated:
+                    next_state = None"""
 
                 # ------ observe ------
                 self.agent.observe(state, action, reward, next_state, terminated)
@@ -100,7 +100,7 @@ class Training():
                 mv_avg_reward = np.mean(self.statistics["ep_rew"][-self.mavg_window_size:-1])
                 self.statistics["mv_avg_rew"].append(mv_avg_reward)
                 if mv_avg_reward > best_mv_avg_reward:
-                    self.agent.save(self.experiment_path)
+                    self.agent.save_dict(self.experiment_path)
                     best_mv_avg_reward = mv_avg_reward
                     if self.verbose:
                         print(f"Saved model with moving average reward: {mv_avg_reward}")
@@ -116,6 +116,7 @@ class Training():
     
     def save_data(self, mean_eval_score = 0):
 
+        # ------ create reward plot -------
         mavg_data = np.array(self.statistics["mv_avg_rew"])
         # Create an x-axis that starts at self.mavg_window_size
         x_axis = np.arange(self.mavg_window_size, self.mavg_window_size + len(mavg_data))
@@ -130,6 +131,7 @@ class Training():
         plt.savefig(os.path.join(self.experiment_path, f"episode_rewards-{self.agent.MODEL_IDENTIFIER}.png"), dpi=300)
         plt.close()
 
+        # ------ create loss plot ------
         plt.figure(figsize=(8, 6), dpi=300)
         plt.plot(np.array(self.statistics["tr_loss"]))
         plt.xlabel("Time Step")
@@ -138,6 +140,7 @@ class Training():
         plt.savefig(os.path.join(self.experiment_path, f"training_losses-{self.agent.MODEL_IDENTIFIER}.png"), dpi=300)
         plt.close()
 
+        # ------ create q-value plot ------
         plt.figure(figsize=(8, 6), dpi=300)
         plt.plot(np.array(self.statistics["mean_q"]), label="Mean Q", color="blue", linewidth=1.5)
         plt.plot(np.array(self.statistics["max_q"]), label="Max Q", color="green", linestyle="--", alpha=0.7)

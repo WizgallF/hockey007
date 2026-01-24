@@ -1,51 +1,84 @@
 from __future__ import annotations
-
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
 
 import numpy as np
 
 class Agent(ABC):
     @abstractmethod
     def act(
-        obs: np.ndarray
-        ) -> np.ndarray:
+            self,
+            env,
+            state: np.ndarray,
+            statistics: dict[str, list] = None
+            ):
         """
-        Docstring for act
+        Given an observation, selects an action.
+        ------------
+        Parameters:
+            env: The environment
+            state: The current state
+            statistics: The training statistics
+        -----------
+        Return:
+            Selected action.
         """
     
     @abstractmethod
     def observe(
-        self,
-        state, 
-        action, 
-        reward, 
-        next_state):
+            self,
+            state: np.ndarray, 
+            action: int, 
+            reward: int, 
+            next_state: np.ndarray,
+            terminated: bool
+            ):
         """
-        Docstring for observe
+        Saves observed transition in the replay buffer.
+        ----------
+        Parameters:
+            state: Current state
+            action: The action selected in current state
+            reward: The reward given in current state for the selected action
+            next_state: The next state of the environment
+            terminated: Whether the episode has terminated after current transition
+
         """
 
     @abstractmethod
     def update(
-        epoch: int = None):
+            self,
+            statistics: dict[str, list] = None
+            ):
         """
-        Docstring for train
+        One training iteration of Ranbow Q-Learning with BATCH_SIZE samples drawn from the replay buffer.
+        ----------
+        Parameters:
+            statistics: The training statistics
         """
 
     @abstractmethod
-    def save(
-        save_path: str = ""
-    ):
+    def save_dict(
+            self,
+            save_path: str = ""
+            ):
         """
-        Docstring for save
+        Save the models state dict to specified path.
+        ----------
+        Parameter:
+            save_path: The path where the model's state dictionary will be saved
         """
     
     @abstractmethod
-    def load_params(
-        load_path: str = ""):
+    def load_dict(
+            self,
+            load_path: str = ""
+            ):
         """
-        Called in __init__ to initialize model
+        Load the models state dict from specified path.
+        ----------
+        Parameter:
+            load_path: The path from which the model's state dictionary will be loaded
         """
 
     

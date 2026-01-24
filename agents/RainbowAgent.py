@@ -1,5 +1,4 @@
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
 import numpy as np
 import torch
 import torch.nn as nn
@@ -15,19 +14,17 @@ from datetime import datetime
 from agents.AgentBaseclass import Agent
 from agents.networks.RainbowNetwork import RainbowNetwork
 from agents.utils.RainbowUtils import ReplayBuffer, LinearSchedule
-from collections import namedtuple, deque
 
-Transition = namedtuple('Transition',
-                        ('state', 'action', 'next_state', 'reward'))
 
 class RainbowAgent(Agent):
     def __init__(
             self,
-            n_observations,
-            n_actions,
-            verbose = False):
+            n_observations: int,
+            n_actions: int,
+            verbose = False
+            ):
 
-        # Load configs from "rainbow_config.yaml"
+        # ------ load configs from "rainbow_config.yaml" ------
         with open("configs/rainbow_config.yaml", 'r') as f:
             config = yaml.safe_load(f)
         self.configs = config
@@ -39,14 +36,17 @@ class RainbowAgent(Agent):
         self.verbose = verbose
         self.t = 0
 
+        # ------ initialize neural networks ------
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.policy_net = RainbowNetwork(n_observations, n_actions, self.device, self.DUELING, self.NOISY, self.DISTRIBUTIONAL_Q, n_atoms=self.N_ATOMS).to(self.device)
         self.target_net = RainbowNetwork(n_observations, n_actions, self.device, self.DUELING, self.NOISY, self.DISTRIBUTIONAL_Q, n_atoms=self.N_ATOMS).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.cur_episode = 0
 
+        # ------ optimizer ------
         self.optimizer = optim.AdamW(self.policy_net.parameters(), lr=self.LR, amsgrad=True)
 
+        # ------ replay buffer ------
         self.replay_buffer = ReplayBuffer(self.BUFFER_SIZE, 
                                    self.GAMMA, 
                                    n_step=self.N_STEP, 
@@ -54,34 +54,49 @@ class RainbowAgent(Agent):
                                    alpha=self.PR_ALPHA, 
                                    beta=self.PR_BETA_START)
         
+        # ------ beta scheduler ------
         self.beta_schedule = LinearSchedule(schedule_timesteps=self.NUM_EPISODES, initial_p=self.PR_BETA_START, final_p=1.0)
 
+        # ------ support ------
         if self.DISTRIBUTIONAL_Q:
             self.support, self.delta_z = self._c51_support()
         else:
             self.support = None
             self.delta_z = None
 
-
-
-
     
     def act(
             self,
             env,
             state: np.ndarray,
-            steps_done,
-            statistics
-            ) -> np.ndarray:
+            steps_done: int,
+            statistics: dict[str, list] = None,
+            greedy: bool = False
+            ) -> int:
         """
-        Docstring for act
+        Given an observation, selects a discrete action. 
+        Uses the epsilon-greedy strategy if network weights 
+        are not noisy and greedy strategy is not used.
+        ------------
+        Parameters:
+            env: The environment
+            state: The current state
+            steps_done: Number of episodes already trained
+            statistics: The training statistics
+            greedy: Whether greedy strategy for action selection is used
+        -----------
+        Return:
+            Integer specifying the selected action.
         """
+
         state = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
         sample = random.random()
         eps_threshold = self.EPS_END + (self.EPS_START - self.EPS_END) * \
             math.exp(-1. * steps_done / self.EPS_DECAY)
         
-        if sample > eps_threshold or self.NOISY:
+        if sample > eps_threshold or self.NOISY or greedy:
+
+            # ------ greedy action selection ------
             if self.DISTRIBUTIONAL_Q:
 
                 logits = self.policy_net(state)                          
@@ -96,33 +111,45 @@ class RainbowAgent(Agent):
                 q_values = self.policy_net(state)
                 return torch.argmax(q_values).detach().item()
         else:
+
+            # ------ random action sampling from environment ------
             return torch.tensor([[env.action_space.sample()]], device=self.device, dtype=torch.long).item()
         
-    
 
     def observe(
             self,
-            state, 
-            action, 
-            reward, 
-            next_state,
-            done):
+            state: np.ndarray, 
+            action: int, 
+            reward: int, 
+            next_state: np.ndarray,
+            terminated: bool
+            ):
         """
-        Docstring for observe
+        Saves observed transition in the replay buffer.
+        ----------
+        Parameters:
+            state: Current state
+            action: The action selected in current state
+            reward: The reward given in current state for the selected action
+            next_state: The next state of the environment
+            terminated: Whether the episode has terminated after current transition
+
         """
 
-        self.replay_buffer.add(np.expand_dims(state, axis=0), np.asarray(action).squeeze(), np.asarray([reward]), np.expand_dims(state, axis=0), int(done))
-
-        
-
+        self.replay_buffer.add(np.expand_dims(state, axis=0), np.asarray(action).squeeze(), np.asarray([reward]), np.expand_dims(next_state, axis=0), int(terminated))
 
     
     def update(
             self,
-            statistics = None):
+            statistics: dict[str, list] = None
+            ):
         """
-        Docstring for train
+        One training iteration of Ranbow Q-Learning with BATCH_SIZE samples drawn from the replay buffer.
+        ----------
+        Parameters:
+            statistics: The training statistics
         """
+
         if self.PRIORITIZED_REPLAY:
                 self.replay_buffer.set_beta(self.beta_schedule.value(self.cur_episode))
 
@@ -168,8 +195,6 @@ class RainbowAgent(Agent):
             criterion = torch.nn.SmoothL1Loss(reduction='none')
             per_sample_loss = criterion(state_action_values, expected_state_action_values).squeeze()
             loss = (per_sample_loss * weights_t).mean()
-
-
 
         else:
             
@@ -242,12 +267,41 @@ class RainbowAgent(Agent):
 
         
     def _c51_support(self):
-            support = torch.linspace(self.VMIN, self.VMAX, self.N_ATOMS, device=self.device)
-            delta_z = (self.VMAX - self.VMIN) / (self.N_ATOMS - 1)
-            return support, delta_z
+        """
+        If distributional Q-Learning is used, creates the support of the atomized probability distribution.
+        -----------
+        Return:
+            Tuple(
+                support: The support for the distribution
+                delta_z: The spacing between the atoms
+                )
+        """
+        support = torch.linspace(self.VMIN, self.VMAX, self.N_ATOMS, device=self.device)
+        delta_z = (self.VMAX - self.VMIN) / (self.N_ATOMS - 1)
+        return support, delta_z
 
-    def _c51_projection(self, next_probs, rewards, non_final_mask):
-        # Implementation is based on the C51 paper: https://arxiv.org/pdf/1707.06887 and the library: "PFRL, a deep reinforcement learning library"
+
+    def _c51_projection(
+            self, 
+            next_probs: torch.Tensor, 
+            rewards: torch.Tensor, 
+            non_final_mask: torch.Tensor
+            ) -> torch.Tensor:
+        """
+        If distributional Q-Learning is used, projects the probabilities of the target support 
+        (which shrink by gamma and shift by the reward) back on the original support.
+        Implementation is based on the C51 paper: https://arxiv.org/pdf/1707.06887 and the library: 
+        "PFRL, a deep reinforcement learning library".
+        -----------
+        Parameters:
+            next_probs: The probability distributions of the next states
+            rewards: The rewards of the sampled transitions
+            non_final_mask: The mask for selecting the transitions that are not terminated
+        -----------
+        Return:
+            The projected target probability distribution.
+        """
+
         B, N = next_probs.shape
 
         
@@ -279,28 +333,45 @@ class RainbowAgent(Agent):
         return m
 
 
-    
-    def save(
+    def save_dict(
             self,
-            experiment_path: str = ""):
+            save_path: str = ""
+            ):
         """
-        Docstring for save
+        Save the models state dict to specified path.
+        ----------
+        Parameter:
+            save_path: The path where the model's state dictionary will be saved
         """
-        saving_dir = os.path.join(experiment_path, self.MODEL_IDENTIFIER + ".pth")
+        saving_dir = os.path.join(save_path, self.MODEL_IDENTIFIER + ".pth")
         torch.save(self.policy_net.state_dict(), saving_dir)
     
     
-    def load_params(
+    def load_dict(
             self,
-            load_path: str = ""):
+            load_path: str = ""
+            ):
         """
-        Called in __init__ to initialize model
+        Load the models state dict from specified path.
+        ----------
+        Parameter:
+            load_path: The path from which the model's state dictionary will be loaded
         """
         checkpoint = torch.load(load_path, map_location=self.device)
         self.policy_net.load_state_dict(checkpoint)
 
-    def save_experiment_config(self, base_dir):
-        # Create a unique folder name 
+
+    def save_experiment_config(
+            self, 
+            base_dir: str = ""
+            ):
+        """
+        Creates a unique folder name and saves experiment configs to it.
+        ----------
+        Parameter:
+            base_dir: The base directory for the experiment folder
+        """
+        # Create a unique folder name using timestamp
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         folder_name = f"{timestamp}_{self.MODEL_IDENTIFIER}"
         experiment_path = os.path.join(base_dir, folder_name)
@@ -313,7 +384,11 @@ class RainbowAgent(Agent):
             
         return experiment_path
     
+
     def print_config(self):
+        """
+        Prints the config to the terminal.
+        """
         # indent=4 makes it look like a structured config file
         pretty_conf = json.dumps(self.configs, indent=4)
         print(f"Loading Agent: {self.MODEL_IDENTIFIER}")

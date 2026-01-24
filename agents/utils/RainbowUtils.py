@@ -5,11 +5,12 @@ from collections import namedtuple, deque
 
 class LinearSchedule(object):
     def __init__(self, schedule_timesteps, final_p, initial_p=1.0):
-        """Linear interpolation between initial_p and final_p over
+        """
+        Linear interpolation between initial_p and final_p over
         schedule_timesteps. After this many timesteps pass final_p is
         returned.
-        Parameters
         ----------
+        Parameters
         schedule_timesteps: int
             Number of timesteps for which to linearly anneal initial_p
             to final_p
@@ -29,9 +30,10 @@ class LinearSchedule(object):
 
 class ReplayBuffer(object):
     def __init__(self, size, gamma, n_step, prioritized=False, alpha=0.6, beta=0.4, eps=1e-6):
-        """Create Replay buffer.
-        Parameters
+        """
+        Create Replay buffer.
         ----------
+        Parameters
         size: int
             Max number of transitions to store in the buffer. When the buffer
             overflows the old memories are dropped.
@@ -60,7 +62,8 @@ class ReplayBuffer(object):
         return len(self._storage)
 
     def add(self, obs_t, action, reward, obs_tp1, done):
-        """ Add a transition to replay memory. 
+        """ 
+        Add a transition to replay memory. 
         Parameters
         ----------
         obs_t: 
@@ -123,7 +126,8 @@ class ReplayBuffer(object):
         return np.squeeze(np.asarray(obses_t), axis=1), np.asarray(actions), np.asarray(rewards, dtype=np.float32), np.squeeze(np.asarray(obses_tp1), axis=1), np.asarray(dones, dtype=np.float32)
 
     def sample(self, batch_size):
-        """Sample a batch of experiences.
+        """
+        Sample a batch of experiences.
         Parameters
         ----------
         batch_size: int
