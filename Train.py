@@ -69,9 +69,6 @@ class Training():
                 next_state, reward, terminated, truncated, _ = self.env.step(action)
 
 
-                """if terminated:
-                    next_state = None"""
-
                 # ------ observe ------
                 self.agent.observe(state, action, reward, next_state, terminated)
                 self.statistics["ep_rew"][-1] += float(reward) 
@@ -84,7 +81,6 @@ class Training():
                 # ------ update ------
                 if i_episode >= self.agent.START_TRAINING:
                     self.agent.update(self.statistics)
-
 
                 # ------ terminate episode ------
                 done = terminated or truncated

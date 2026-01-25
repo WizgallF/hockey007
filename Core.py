@@ -34,7 +34,6 @@ class Core:
             
         elif env_name == "Hockey-One-v0":
             env = gym.envs.make("Hockey-One-v0", mode=0, weak_opponent=True)
-            #env = h_env.HockeyEnv(mode=h_env.Mode.TRAIN_SHOOTING)
             env = DiscreteActionWrapperHockey(env)
             n_actions = env.action_space.n
             state, info = env.reset()
