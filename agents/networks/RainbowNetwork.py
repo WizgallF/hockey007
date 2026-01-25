@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 
 class RainbowNetwork(nn.Module):
-    def __init__(self, observation_size, action_size, device, dueling = True, noisy=True, distributional_q = True, n_atoms=201):
+    def __init__(self, observation_size, action_size, device, dueling = True, noisy=True, distributional_q = True, n_atoms=201, sigma0=0.5):
         """ Create RainbowNetwork
         Parameters
         ----------
@@ -22,6 +22,7 @@ class RainbowNetwork(nn.Module):
         self.noisy = noisy
         self.dueling = dueling
         self.distributional_q = distributional_q
+        self.sigma0 = sigma0
 
         self.n_atoms = n_atoms if self.distributional_q else 1
 
@@ -32,17 +33,17 @@ class RainbowNetwork(nn.Module):
 
         
         #  noisy net linear layers 
-        self.features =  nn.Sequential(NoisyLinearLayer(observation_size, hidden_1_dim, self.noisy), nn.ReLU())
+        self.features =  nn.Sequential(NoisyLinearLayer(observation_size, hidden_1_dim, self.noisy, self.sigma0), nn.ReLU())
 
         if self.dueling:
             self.value = nn.Sequential(
-                NoisyLinearLayer(hidden_1_dim, hidden_2_dim, self.noisy), nn.ReLU(),
-                NoisyLinearLayer(hidden_2_dim, self.n_atoms, self.noisy)
+                NoisyLinearLayer(hidden_1_dim, hidden_2_dim, self.noisy, self.sigma0), nn.ReLU(),
+                NoisyLinearLayer(hidden_2_dim, self.n_atoms, self.noisy, self.sigma0)
             )
 
         self.advantage = nn.Sequential(
-            NoisyLinearLayer(hidden_1_dim, hidden_2_dim, self.noisy), nn.ReLU(),
-            NoisyLinearLayer(hidden_2_dim, action_size * self.n_atoms, self.noisy)
+            NoisyLinearLayer(hidden_1_dim, hidden_2_dim, self.noisy, self.sigma0), nn.ReLU(),
+            NoisyLinearLayer(hidden_2_dim, action_size * self.n_atoms, self.noisy, self.sigma0)
         )
             
 
@@ -88,7 +89,7 @@ class RainbowNetwork(nn.Module):
     
 
 class NoisyLinearLayer(nn.Module):
-    def __init__(self, in_features, out_features, sigma0=0.5, noisy = True):
+    def __init__(self, in_features, out_features, noisy = True, sigma0=0.5):
         """Factorised Noisy Linear layer
         Parameters
         ----------

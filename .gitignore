@@ -4,6 +4,10 @@ hockey_env/
 # Custom Experiment Folders
 experiments/
 
+# SLURM server 
+job_outputs/
+*.sbatch
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

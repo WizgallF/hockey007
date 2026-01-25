@@ -38,13 +38,13 @@ class RainbowAgent(Agent):
 
         # ------ initialize neural networks ------
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.policy_net = RainbowNetwork(n_observations, n_actions, self.device, self.DUELING, self.NOISY, self.DISTRIBUTIONAL_Q, n_atoms=self.N_ATOMS).to(self.device)
-        self.target_net = RainbowNetwork(n_observations, n_actions, self.device, self.DUELING, self.NOISY, self.DISTRIBUTIONAL_Q, n_atoms=self.N_ATOMS).to(self.device)
+        self.policy_net = RainbowNetwork(n_observations, n_actions, self.device, self.DUELING, self.NOISY, self.DISTRIBUTIONAL_Q, n_atoms=self.N_ATOMS, sigma0=self.SIGMA0).to(self.device)
+        self.target_net = RainbowNetwork(n_observations, n_actions, self.device, self.DUELING, self.NOISY, self.DISTRIBUTIONAL_Q, n_atoms=self.N_ATOMS, sigma0=self.SIGMA0).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.cur_episode = 0
 
         # ------ optimizer ------
-        self.optimizer = optim.AdamW(self.policy_net.parameters(), lr=self.LR, amsgrad=True)
+        self.optimizer = optim.Adam(self.policy_net.parameters(), lr=self.LR, betas=(self.ADAM_BETA_1, self.ADAM_BETA_2), eps=self.ADAM_EPS)
 
         # ------ replay buffer ------
         self.replay_buffer = ReplayBuffer(self.BUFFER_SIZE, 

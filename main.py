@@ -10,9 +10,6 @@ import platform
 
 
 def main ():
-    print ("python version:\t{0}".format (platform.python_version()))
-    print ("gym version:\t{0}".format(gym.__version__))
-
     # get args
     parser = argparse.ArgumentParser()
 
