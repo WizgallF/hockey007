@@ -17,7 +17,7 @@ class Training():
         base_dir = "experiments",
         save_intermediate_agents: bool = False,
         verbose=False,
-        mavg_window_size = 15
+        mavg_window_size = 100
         ):
         
         self.statistics = {

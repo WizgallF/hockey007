@@ -81,7 +81,7 @@ class RainbowAgent(Agent):
         Parameters:
             env: The environment
             state: The current state
-            steps_done: Number of episodes already trained
+            steps_done: Number of transitions already seen
             statistics: The training statistics
             greedy: Whether greedy strategy for action selection is used
         -----------
