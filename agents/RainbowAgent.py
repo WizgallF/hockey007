@@ -52,10 +52,12 @@ class RainbowAgent(Agent):
                                    n_step=self.N_STEP, 
                                    prioritized=self.PRIORITIZED_REPLAY, 
                                    alpha=self.PR_ALPHA, 
-                                   beta=self.PR_BETA_START)
+                                   beta=self.PR_BETA_START,
+                                   prio_clipping = self.PRIO_CLIP,
+                                   prio_clip_value = self.PRIO_CLIP_VALUE)
         
         # ------ beta scheduler ------
-        self.beta_schedule = LinearSchedule(schedule_timesteps=self.NUM_EPISODES, initial_p=self.PR_BETA_START, final_p=1.0)
+        self.beta_schedule = LinearSchedule(schedule_timesteps=self.NUM_EPISODES * self.BETA_TARGET_REACHED * int(self.BETA_SCHEDULE_ACTIVE), initial_p=self.PR_BETA_START, final_p=1.0)
 
         # ------ support ------
         if self.DISTRIBUTIONAL_Q:
@@ -69,7 +71,7 @@ class RainbowAgent(Agent):
             self,
             env,
             state: np.ndarray,
-            steps_done: int,
+            i_episode: int,
             statistics: dict[str, list] = None,
             greedy: bool = False
             ) -> int:
@@ -81,7 +83,7 @@ class RainbowAgent(Agent):
         Parameters:
             env: The environment
             state: The current state
-            steps_done: Number of transitions already seen
+            i_episode: Number of episodes already seen
             statistics: The training statistics
             greedy: Whether greedy strategy for action selection is used
         -----------
@@ -92,7 +94,7 @@ class RainbowAgent(Agent):
         state = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
         sample = random.random()
         eps_threshold = self.EPS_END + (self.EPS_START - self.EPS_END) * \
-            math.exp(-1. * steps_done / self.EPS_DECAY)
+            math.exp(-1. * i_episode * 0.69 / (self.EPS_DECAY * self.NUM_EPISODES)) # after EPS_DECAY proportion of episodes, the schedule divides eps/2 as ln(1/2) = -0.69
         
         if sample > eps_threshold or self.NOISY or greedy:
 

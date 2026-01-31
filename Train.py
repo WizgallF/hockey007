@@ -16,8 +16,7 @@ class Training():
         env = None,
         base_dir = "experiments",
         save_intermediate_agents: bool = False,
-        verbose=False,
-        mavg_window_size = 100
+        verbose=False
         ):
         
         self.statistics = {
@@ -34,8 +33,7 @@ class Training():
         self.base_dir = base_dir
         self.save_intermediate_agents = save_intermediate_agents
         self.verbose = verbose
-        self.mavg_window_size = mavg_window_size
-        self.steps_done = 0
+        self.mavg_window_size = int(self.agent.NUM_EPISODES / 100)
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -62,10 +60,9 @@ class Training():
             state, info = self.env.reset()
             
             for t in count():
-                self.steps_done +=1
 
                 # ------ act ------
-                action = self.agent.act(self.env, state, self.steps_done, self.statistics)
+                action = self.agent.act(self.env, state, i_episode, self.statistics)
                 next_state, reward, terminated, truncated, _ = self.env.step(action)
 
 
@@ -107,7 +104,7 @@ class Training():
                 end = time.time()
                 print(f"\n** after {i_episode} th episode - {end - start:.5f} sec passed**\n")
             
-        
+
         self.save_data()
     
     def save_data(self, mean_eval_score = 0):
