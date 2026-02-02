@@ -28,20 +28,21 @@ class Core:
         
         if env_name == "Pendulum-v1":
             env = gym.make(env_name)
-            #env = DiscreteActionWrapperPendulum(env, bins)
-            n_actions = env.action_space.n
+            if agent_name == "rainbow":
+                env = DiscreteActionWrapperPendulum(env, bins)
+                n_actions = env.action_space.n
             state, info = env.reset()
             n_observations = len(state)
             
         elif env_name == "Hockey-One-v0":
             env = gym.envs.make("Hockey-One-v0", mode=0, weak_opponent=True)
-            env = DiscreteActionWrapperHockey(env)
-            n_actions = env.action_space.n
+            if agent_name == "rainbow":
+                env = DiscreteActionWrapperHockey(env)
+                n_actions = env.action_space.n
             state, info = env.reset()
             n_observations = len(state)
 
-        
-
+    
         if agent_name == "rainbow": 
             agent = RainbowAgent(
                 n_observations,
