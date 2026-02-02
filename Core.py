@@ -7,7 +7,7 @@ from agents.AgentBaseclass import Agent
 from agents.RainbowAgent import RainbowAgent
 from agents.DDPGAgent import DDPGAgent
 from Wrapper import Envwrapper, DiscreteActionWrapperPendulum, DiscreteActionWrapperHockey
-
+from agents.TDMPC2Agent import TDMPC2Agent
 
 
 class Core:
@@ -53,6 +53,11 @@ class Core:
                 env.observation_space,
                 env.action_space,
                 verbose=verbose)
+        elif agent_name == "tdmpc2":
+            agent =  TDMPC2Agent(
+                env.action_space,
+                env.observation_space
+            )
         else:
             raise NotImplementedError
         
