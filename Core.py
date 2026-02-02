@@ -5,6 +5,7 @@ import time
 from Train import Training
 from agents.AgentBaseclass import Agent
 from agents.RainbowAgent import RainbowAgent
+from agents.DDPGAgent import DDPGAgent
 from Wrapper import Envwrapper, DiscreteActionWrapperPendulum, DiscreteActionWrapperHockey
 
 
@@ -27,7 +28,7 @@ class Core:
         
         if env_name == "Pendulum-v1":
             env = gym.make(env_name)
-            env = DiscreteActionWrapperPendulum(env, bins)
+            #env = DiscreteActionWrapperPendulum(env, bins)
             n_actions = env.action_space.n
             state, info = env.reset()
             n_observations = len(state)
@@ -46,6 +47,11 @@ class Core:
                 n_observations,
                 n_actions,
                 verbose)
+        elif agent_name == "ddpg":
+            agent = DDPGAgent(
+                env.observation_space,
+                env.action_space,
+                verbose=verbose)
         else:
             raise NotImplementedError
         
@@ -102,7 +108,7 @@ class Core:
                         discrete_action = player2.act(env=env, state=obs, greedy=True) 
                         a2 = self._discrete_to_continuous(discrete_action)
                     else:
-                        a2 = player1.act(obs) 
+                        a2 = player2.act(obs)
 
                     obs, r, d, _, info = env.step(np.hstack([a1,a2]))   
                     obs_agent2 = env.obs_agent_two()
@@ -110,7 +116,10 @@ class Core:
                     score["player1"] += 1
                 else:
                     score["player2"] += 1
-                print(f"fAfter game: {episode + 1}: [{score["player1"]} - {score["player2"]}] Player {2 - info["winner"]} WON!")
+                print(
+                    f"After game {episode + 1}: [{score['player1']} - {score['player2']}] "
+                    f"Player {2 - info['winner']} WON!"
+                )
 
         env.close()
 
@@ -153,5 +162,4 @@ class Core:
 
         return action_cont
     
-
 
