@@ -1,7 +1,8 @@
 import numpy as np
 import torch
 import time
-from agents.AgentBaseclass import Agent
+from agents.AgentBaseclass import Agent 
+from agents.RainbowAgent import RainbowAgent
 import os
 from datetime import datetime
 import torch.optim as optim
@@ -106,6 +107,9 @@ class Training():
             
 
         self.save_data()
+
+        if type(self.agent) == RainbowAgent:
+            self.save_q_values()
     
     def save_data(self, mean_eval_score = 0):
 
@@ -133,6 +137,7 @@ class Training():
         plt.savefig(os.path.join(self.experiment_path, f"training_losses-{self.agent.MODEL_IDENTIFIER}.png"), dpi=300)
         plt.close()
 
+    def save_q_values(self):
         # ------ create q-value plot ------
         plt.figure(figsize=(8, 6), dpi=300)
         plt.plot(np.array(self.statistics["mean_q"]), label="Mean Q", color="blue", linewidth=1.5)
