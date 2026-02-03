@@ -71,7 +71,7 @@ class RainbowAgent(Agent):
             self,
             env,
             state: np.ndarray,
-            i_episode: int,
+            i_episode: int = 0,
             statistics: dict[str, list] = None,
             greedy: bool = False
             ) -> int:

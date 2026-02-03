@@ -14,6 +14,7 @@ def main ():
     parser = argparse.ArgumentParser()
 
     parser.add_argument ( '--train', default=False, action="store_true", help="Train an agent in a specified environment" )
+    parser.add_argument ( '--play', default=False, action="store_true", help="Let an agent play against the basic opponent" )
     parser.add_argument ( '--agent', type=str, default="rainbow", help = "Specify the agent to use for training/evaluation")
     parser.add_argument ( '--env', type=str, default="Hockey-One-v0", help = "Specify the environment to use for training/evaluation")
     parser.add_argument ( '--base_dir', type=str, default="experiments", help = "Specify the directory used for experimentation")
@@ -25,6 +26,10 @@ def main ():
 
     if args.train:
         core.train_agent(args.agent, args.env, args.base_dir, args.int_agents, args.verbose)
+    elif args.play:
+        
+        core.play(environment=args.env, player1=args.agent)
+        #core.play(environment=args.env, player1=args.agent, player2=args.agent)
 
 
 
