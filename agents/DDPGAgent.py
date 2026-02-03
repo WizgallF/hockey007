@@ -106,32 +106,21 @@ class DDPGAgent(Agent):
         self._action_n = int(self._action_space.shape[0])
         self.device = device
 
-        self._config = {
-            "model_identifier": "DDPG",
-            "num_episodes": 1000,
-            "start_training": 0,
-            "eps": 0.1,
-            "discount": 0.95,
-            "buffer_size": int(1e6),
-            "batch_size": 128,
-            "train_iterations": 1,
-            "learning_rate_actor": 0.00001,
-            "learning_rate_critic": 0.0001,
-            "hidden_sizes_actor": [128, 128],
-            "hidden_sizes_critic": [128, 128, 64],
-            "update_target_every": 100,
-            "use_target_net": True,
-            "tau": None,
-            "action_noise_theta": 0.15,
-            "action_noise_dt": 1e-2,
-        }
-        self._apply_yaml_config("configs/ddpg_config.yaml")
-        self._apply_user_config(userconfig)
+        if userconfig:
+            extra_keys = {key for key in userconfig.keys() if key != "verbose"}
+            if extra_keys:
+                raise ValueError(
+                    "DDPGAgent only uses configs/ddpg_config.yaml; remove overrides "
+                    f"(unsupported keys: {', '.join(sorted(extra_keys))})."
+                )
+        self.verbose = bool(userconfig.get("verbose", False)) if userconfig else False
 
-        self.MODEL_IDENTIFIER = self._config["model_identifier"]
-        self.NUM_EPISODES = self._config["num_episodes"]
-        self.START_TRAINING = self._config["start_training"]
-        self._eps = self._config["eps"]
+        self._config = self._load_config("configs/ddpg_config.yaml")
+
+        self.MODEL_IDENTIFIER = self._config["MODEL_IDENTIFIER"]
+        self.NUM_EPISODES = self._config["NUM_EPISODES"]
+        self.START_TRAINING = self._config["START_TRAINING"]
+        self._eps = self._config["EPS"]
 
         self._action_low = np.asarray(self._action_space.low, dtype=np.float32)
         self._action_high = np.asarray(self._action_space.high, dtype=np.float32)
@@ -140,34 +129,47 @@ class DDPGAgent(Agent):
 
         self.action_noise = OUNoise(
             (self._action_n,),
-            theta=self._config["action_noise_theta"],
-            dt=self._config["action_noise_dt"],
+            theta=self._config["ACTION_NOISE_THETA"],
+            dt=self._config["ACTION_NOISE_DT"],
         )
-        self.buffer = Memory(max_size=self._config["buffer_size"])
+        self.buffer = Memory(max_size=self._config["BUFFER_SIZE"])
 
         self.Q = QFunction(
             observation_dim=self._obs_dim,
             action_dim=self._action_n,
-            hidden_sizes=self._config["hidden_sizes_critic"],
-            learning_rate=self._config["learning_rate_critic"],
+            hidden_sizes=self._config["HIDDEN_SIZES_CRITIC"],
+            learning_rate=self._config["LEARNING_RATE_CRITIC"],
         ).to(self.device)
         self.Q_target = QFunction(
             observation_dim=self._obs_dim,
             action_dim=self._action_n,
-            hidden_sizes=self._config["hidden_sizes_critic"],
+            hidden_sizes=self._config["HIDDEN_SIZES_CRITIC"],
             learning_rate=0.0,
         ).to(self.device)
+        if self._config["TWIN_DELAYED"]:
+            self.Q2 = QFunction(
+                observation_dim=self._obs_dim,
+                action_dim=self._action_n,
+                hidden_sizes=self._config["HIDDEN_SIZES_CRITIC"],
+                learning_rate=self._config["LEARNING_RATE_CRITIC"],
+            ).to(self.device)
+            self.Q2_target = QFunction(
+                observation_dim=self._obs_dim,
+                action_dim=self._action_n,
+                hidden_sizes=self._config["HIDDEN_SIZES_CRITIC"],
+                learning_rate=0.0,
+            ).to(self.device)
 
         self.policy = DDPGNetwork(
             input_size=self._obs_dim,
-            hidden_sizes=self._config["hidden_sizes_actor"],
+            hidden_sizes=self._config["HIDDEN_SIZES_ACTOR"],
             output_size=self._action_n,
             activation_fun=torch.nn.ReLU(),
             output_activation=torch.nn.Tanh(),
         ).to(self.device)
         self.policy_target = DDPGNetwork(
             input_size=self._obs_dim,
-            hidden_sizes=self._config["hidden_sizes_actor"],
+            hidden_sizes=self._config["HIDDEN_SIZES_ACTOR"],
             output_size=self._action_n,
             activation_fun=torch.nn.ReLU(),
             output_activation=torch.nn.Tanh(),
@@ -177,7 +179,7 @@ class DDPGAgent(Agent):
 
         self.optimizer = torch.optim.Adam(
             self.policy.parameters(),
-            lr=self._config["learning_rate_actor"],
+            lr=self._config["LEARNING_RATE_ACTOR"],
             eps=1e-6,
         )
         self.train_iter = 0
@@ -249,18 +251,23 @@ class DDPGAgent(Agent):
         self.buffer.add_transition(transition)
 
     def update(self, statistics: dict[str, list] | None = None) -> list[tuple[float, float]] | None:
-        if self.buffer.size < self._config["batch_size"]:
+        last_critic_loss = None
+        last_q_values = None
+        if self.buffer.size < self._config["BATCH_SIZE"]:
             return None
 
         self.train_iter += 1
-        if self._config["use_target_net"] and self._config["tau"] is None:
-            if self.train_iter % self._config["update_target_every"] == 0:
+        if self._config["USE_TARGET_NET"] and self._config["TAU"] is None:
+            if self.train_iter % self._config["UPDATE_TARGET_EVERY"] == 0:
                 self._copy_nets()
 
         losses: list[tuple[float, float]] = []
-        iter_fit = int(self._config["train_iterations"])
+        iter_fit = int(self._config["TRAIN_ITERATIONS"])
+        self.grad_step = getattr(self, "grad_step", 0)
+
         for _ in range(iter_fit):
-            data = self.buffer.sample(batch=self._config["batch_size"])
+            self.grad_step += 1
+            data = self.buffer.sample(batch=self._config["BATCH_SIZE"])
 
             s = torch.from_numpy(np.stack(data[:, 0])).float().to(self.device)
             a = torch.from_numpy(np.stack(data[:, 1])).float().to(self.device)
@@ -269,39 +276,65 @@ class DDPGAgent(Agent):
             done = torch.from_numpy(np.stack(data[:, 4])[:, None]).float().to(self.device)
 
             with torch.no_grad():
-                if self._config["use_target_net"]:
+                assert self._config["USE_TARGET_NET"], "TD3 expects target nets; re-add else if needed"
+                if self._config["USE_TARGET_NET"]:
                     next_actions = self._scale_action_torch(self.policy_target(s_prime))
-                    q_prime = self.Q_target.Q_value(s_prime, next_actions)
-                else:
-                    next_actions = self._scale_action_torch(self.policy(s_prime))
-                    q_prime = self.Q.Q_value(s_prime, next_actions)
+                    if self._config["POLICY_NOISE"] > 0:
+                        noise = (
+                            torch.randn_like(next_actions) * self._config["POLICY_NOISE"]
+                        ).clamp(-self._config["NOISE_CLIP"], self._config["NOISE_CLIP"])
+                        next_actions = (next_actions + noise)
+                    next_actions = torch.clamp(next_actions, self._action_low_t, self._action_high_t)
+                    if self._config["TWIN_DELAYED"]:
+                        q1_prime = self.Q_target.Q_value(s_prime, next_actions)
+                        q2_prime = self.Q2_target.Q_value(s_prime, next_actions)
+                        q_prime = torch.min(q1_prime, q2_prime)
+                    else:
+                        q_prime = self.Q_target.Q_value(s_prime, next_actions)
+                #else:
+                #    if self._config['TWIN_DELAYED']:
+                #        q1_prime = self.Q.Q_value(s_prime, next_actions)
+                #        q2_prime = self.Q2.Q_value(s_prime, next_actions)
+                #        q_prime = torch.min(q1_prime, q2_prime)
+                #    else:
+                #        next_actions = self._scale_action_torch(self.policy(s_prime))
+                #        q_prime = self.Q.Q_value(s_prime, next_actions)
 
-                gamma = float(self._config["discount"])
+                gamma = float(self._config["DISCOUNT"])
                 td_target = rew + gamma * (1.0 - done) * q_prime
 
             critic_loss = self.Q.fit(s, a, td_target)
+            last_critic_loss = critic_loss
 
-            self.optimizer.zero_grad()
-            current_actions = self._scale_action_torch(self.policy(s))
-            q_values = self.Q.Q_value(s, current_actions)
-            actor_loss = -torch.mean(q_values)
-            actor_loss.backward()
-            self.optimizer.step()
+            if self._config["TWIN_DELAYED"]:
+                critic2_loss = self.Q2.fit(s, a, td_target)
 
-            losses.append((critic_loss, float(actor_loss.detach().cpu().item())))
+            policy_delay = int(self._config.get("POLICY_DELAY", 2))
+            if self.grad_step % policy_delay == 0:
+                self.optimizer.zero_grad()
+                current_actions = self._scale_action_torch(self.policy(s))
+                q_values = self.Q.Q_value(s, current_actions)
+                last_q_values = q_values.detach()
+                actor_loss = -torch.mean(q_values)
+                actor_loss.backward()
+                self.optimizer.step()
 
-            if self._config["use_target_net"] and self._config["tau"] is not None:
-                self._soft_update(float(self._config["tau"]))
+                losses.append((critic_loss, float(actor_loss.detach().cpu().item())))
 
-        if statistics is not None and losses:
-            if "tr_loss" in statistics:
-                statistics["tr_loss"].append(losses[-1][0])
-            if "mean_q" in statistics:
-                statistics["mean_q"].append(float(q_values.mean().detach().cpu().item()))
-            if "min_q" in statistics:
-                statistics["min_q"].append(float(q_values.min().detach().cpu().item()))
-            if "max_q" in statistics:
-                statistics["max_q"].append(float(q_values.max().detach().cpu().item()))
+                if self._config["USE_TARGET_NET"] and self._config["TAU"] is not None:
+                    self._soft_update(float(self._config["TAU"]))
+
+        if statistics is not None:
+            if last_critic_loss is not None and "tr_loss" in statistics:
+                statistics["tr_loss"].append(last_critic_loss)
+
+            if last_q_values is not None:
+                if "mean_q" in statistics:
+                    statistics["mean_q"].append(float(last_q_values.mean().cpu().item()))
+                if "min_q" in statistics:
+                    statistics["min_q"].append(float(last_q_values.min().cpu().item()))
+                if "max_q" in statistics:
+                    statistics["max_q"].append(float(last_q_values.max().cpu().item()))
 
         return losses
 
@@ -347,65 +380,34 @@ class DDPGAgent(Agent):
         print(f"Loading Agent: {self.MODEL_IDENTIFIER}")
         print(yaml.dump(self._config, sort_keys=False))
 
-    def _apply_yaml_config(self, config_path: str) -> None:
-        try:
-            with open(config_path, "r") as f:
-                config = yaml.safe_load(f) or {}
-        except FileNotFoundError:
-            return
+    def _load_config(self, config_path: str) -> dict[str, Any]:
+        with open(config_path, "r") as f:
+            config = yaml.safe_load(f) or {}
 
-        key_map = {
-            "MODEL_IDENTIFIER": "model_identifier",
-            "NUM_EPISODES": "num_episodes",
-            "START_TRAINING": "start_training",
-            "EPS": "eps",
-            "DISCOUNT": "discount",
-            "BUFFER_SIZE": "buffer_size",
-            "BATCH_SIZE": "batch_size",
-            "TRAIN_ITERATIONS": "train_iterations",
-            "LEARNING_RATE_ACTOR": "learning_rate_actor",
-            "LEARNING_RATE_CRITIC": "learning_rate_critic",
-            "HIDDEN_SIZES_ACTOR": "hidden_sizes_actor",
-            "HIDDEN_SIZES_CRITIC": "hidden_sizes_critic",
-            "UPDATE_TARGET_EVERY": "update_target_every",
-            "USE_TARGET_NET": "use_target_net",
-            "TAU": "tau",
-            "ACTION_NOISE_THETA": "action_noise_theta",
-            "ACTION_NOISE_DT": "action_noise_dt",
-        }
-
-        for key, value in config.items():
-            if key in key_map:
-                self._config[key_map[key]] = value
-            elif key in self._config:
-                self._config[key] = value
-
-    def _apply_user_config(self, userconfig: dict[str, Any]) -> None:
-        if not userconfig:
-            return
-
-        key_map = {
-            "MODEL_IDENTIFIER": "model_identifier",
-            "NUM_EPISODES": "num_episodes",
-            "START_TRAINING": "start_training",
-            "EPS": "eps",
-            "DISCOUNT": "discount",
-            "BUFFER_SIZE": "buffer_size",
-            "BATCH_SIZE": "batch_size",
-            "TRAIN_ITERATIONS": "train_iterations",
-            "LEARNING_RATE_ACTOR": "learning_rate_actor",
-            "LEARNING_RATE_CRITIC": "learning_rate_critic",
-            "HIDDEN_SIZES_ACTOR": "hidden_sizes_actor",
-            "HIDDEN_SIZES_CRITIC": "hidden_sizes_critic",
-            "UPDATE_TARGET_EVERY": "update_target_every",
-            "USE_TARGET_NET": "use_target_net",
-            "TAU": "tau",
-            "ACTION_NOISE_THETA": "action_noise_theta",
-            "ACTION_NOISE_DT": "action_noise_dt",
-        }
-
-        for key, value in userconfig.items():
-            if key in key_map:
-                self._config[key_map[key]] = value
-            elif key in self._config:
-                self._config[key] = value
+        required = [
+            "MODEL_IDENTIFIER",
+            "NUM_EPISODES",
+            "START_TRAINING",
+            "EPS",
+            "DISCOUNT",
+            "BUFFER_SIZE",
+            "BATCH_SIZE",
+            "TRAIN_ITERATIONS",
+            "LEARNING_RATE_ACTOR",
+            "LEARNING_RATE_CRITIC",
+            "HIDDEN_SIZES_ACTOR",
+            "HIDDEN_SIZES_CRITIC",
+            "UPDATE_TARGET_EVERY",
+            "USE_TARGET_NET",
+            "TAU",
+            "ACTION_NOISE_THETA",
+            "ACTION_NOISE_DT",
+            "TWIN_DELAYED",
+            "POLICY_NOISE",
+            "NOISE_CLIP",
+            "POLICY_DELAY",
+        ]
+        missing = [key for key in required if key not in config]
+        if missing:
+            raise KeyError(f"Missing DDPG config keys: {', '.join(missing)}")
+        return config
