@@ -111,10 +111,10 @@ class Core:
                         a1 = player1.act(obs) 
 
                     if type(player2) == RainbowAgent:
-                        discrete_action = player2.act(env=env, state=obs, greedy=True) 
+                        discrete_action = player2.act(env=env, state=obs_agent2, greedy=True) 
                         a2 = self._discrete_to_continuous(discrete_action)
                     else:
-                        a2 = player2.act(obs)
+                        a2 = player2.act(obs_agent2)
 
                     obs, r, d, _, info = env.step(np.hstack([a1,a2]))   
                     obs_agent2 = env.obs_agent_two()
