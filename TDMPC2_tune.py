@@ -18,6 +18,7 @@ import math
 import os
 import random
 import sys
+from pathlib import Path
 from typing import Any, Dict, List
 
 import numpy as np
@@ -370,6 +371,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+
+    # Ensure relative paths (like configs/tdmpc_config.yaml) resolve from repo root
+    repo_root = Path(__file__).resolve().parent
+    os.chdir(repo_root)
 
     if args.wandb_mode is None:
         args.wandb_mode = os.environ.get("WANDB_MODE", None)
