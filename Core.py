@@ -8,6 +8,7 @@ from agents.RainbowAgent import RainbowAgent
 from agents.DDPGAgent import DDPGAgent
 from Wrapper import Envwrapper, DiscreteActionWrapperPendulum, DiscreteActionWrapperHockey
 from agents.TDMPC2Agent import TDMPC2Agent
+from gymnasium import spaces
 
 
 class Core:
@@ -85,13 +86,19 @@ class Core:
             environment: str = 'Hockey-One-v0',
             player1: str | Agent = 'BasicOpp',
             player2: str | Agent = 'BasicOpp',
-            num_episodes: int = 50
+            num_episodes: int = 50,
+            agent1_type: str = 'rainbow',
+            agent2_type: str = 'rainbow',
+            agent1_path: str = None,
+            agent2_path: str = None,
+            agent1_config: str = None,
+            agent2_config: str = None
             ):
         
         if environment == 'Hockey-One-v0':
             env = h_env.HockeyEnv()
-            player1 = self._resolve_player(player1, env, player_id=1)
-            player2 = self._resolve_player(player2, env, player_id=2)
+            player1 = self._resolve_player(player1, env, player_id=1, agent_path=agent1_path, config_path=agent1_config)
+            player2 = self._resolve_player(player2, env, player_id=2, agent_path=agent2_path, config_path=agent2_config)
             obs, info = env.reset()
             env.render()
             time.sleep(1)
@@ -129,7 +136,13 @@ class Core:
 
         env.close()
 
-    def _resolve_player(self, player, env, player_id: int):
+    def _resolve_player(
+            self, 
+            player, 
+            env, 
+            player_id: int, 
+            agent_path: str = None, 
+            config_path: str = None):
         if isinstance(player, str):
             key = player.lower()
             if key in {"human", "humanopponent"}:
@@ -146,10 +159,21 @@ class Core:
                 state, info = env.reset()
                 n_observations = len(state)
 
-                agent = RainbowAgent(n_observations, n_actions)
-                agent.load_dict(load_path="/home/nils-klute/Documents/machine_learning/Reinforcement Learning/hockey007/saved_agents/rainbow.pth")
-
-
+                agent = RainbowAgent(n_observations, n_actions, config_path=config_path)
+                agent.load_dict(load_path=agent_path)
+                return agent
+            if key in {"ddpg"}:
+                single_player_action_space = spaces.Box(
+                    low=env.action_space.low[:4],
+                    high=env.action_space.high[:4],
+                    dtype=env.action_space.dtype,
+                )
+                agent = DDPGAgent(
+                    env.observation_space,
+                    single_player_action_space,
+                    config_path=config_path
+                )
+                agent.load_dict(load_path=agent_path)
                 return agent
         return player
     

@@ -16,6 +16,15 @@ def main ():
     parser.add_argument ( '--train', default=False, action="store_true", help="Train an agent in a specified environment" )
     parser.add_argument ( '--play', default=False, action="store_true", help="Let an agent play against the basic opponent" )
     parser.add_argument ( '--agent', type=str, default="rainbow", help = "Specify the agent to use for training/evaluation")
+
+    parser.add_argument ( '--playagent_1_type', type=str, default="rainbow", help = "Specify the agent 1 to use for evaluation")
+    parser.add_argument ( '--playagent1_path', type=str, default="/home/nils-klute/Documents/machine_learning/Reinforcement Learning/hockey007/saved_agents/rainbow.pth", help = "Path to the trained agent 1 for evaluation")
+    parser.add_argument ( '--playagent1_config', type=str, default=None, help = "Path to the config file for agent 1 (only for evaluation)")
+
+    parser.add_argument ( '--playagent_2_type', type=str, default="rainbow", help = "Specify the agent 2 to use for evaluation")
+    parser.add_argument ( '--playagent2_path', type=str, default="/home/nils-klute/Documents/machine_learning/Reinforcement Learning/hockey007/saved_agents/rainbow.pth", help = "Path to the trained agent 2 for evaluation")
+    parser.add_argument ( '--playagent2_config', type=str, default=None, help = "Path to the config file for agent 2 (only for evaluation)")
+    
     parser.add_argument ( '--env', type=str, default="Hockey-One-v0", help = "Specify the environment to use for training/evaluation")
     parser.add_argument ( '--base_dir', type=str, default="experiments", help = "Specify the directory used for experimentation")
     parser.add_argument ( '--int_agents', default=False, action="store_true", help="Save intermediate agents during training" )
@@ -26,10 +35,15 @@ def main ():
 
     if args.train:
         core.train_agent(args.agent, args.env, args.base_dir, args.int_agents, args.verbose)
-    elif args.play:
-        
-        core.play(environment=args.env, player1=args.agent)
-        #core.play(environment=args.env, player1=args.agent, player2=args.agent)
+    elif args.play:        
+        core.play(
+            environment=args.env, 
+            player1=args.playagent_1_type, 
+            player2=args.playagent_2_type, 
+            agent_path=args.playagent1_path, 
+            config_path=args.playagent1_config, 
+            agent2_path=args.playagent2_path, 
+            agent2_config=args.playagent2_config)
 
 
 

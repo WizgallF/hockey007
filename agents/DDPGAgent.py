@@ -90,7 +90,12 @@ class DDPGAgent(Agent):
     DDPG agent compatible with the local Agent wrapper API.
     """
 
-    def __init__(self, observation_space: spaces.Box, action_space: spaces.Box, **userconfig: Any):
+    def __init__(self, 
+                 observation_space: spaces.Box, 
+                 action_space: spaces.Box, 
+                 config_path: str = "configs/ddpg_config.yaml",  
+                 **userconfig: Any):
+        
         if not isinstance(observation_space, spaces.Box):
             raise UnsupportedSpace(
                 f"Observation space {observation_space} incompatible with {self}. (Require: Box)"
@@ -115,7 +120,7 @@ class DDPGAgent(Agent):
                 )
         self.verbose = bool(userconfig.get("verbose", False)) if userconfig else False
 
-        self._config = self._load_config("configs/ddpg_config.yaml")
+        self._config = self._load_config(config_path)
 
         self.MODEL_IDENTIFIER = self._config["MODEL_IDENTIFIER"]
         self.NUM_EPISODES = self._config["NUM_EPISODES"]
