@@ -21,17 +21,18 @@ class RainbowAgent(Agent):
             self,
             n_observations: int,
             n_actions: int,
-            config_path: str = "configs/rainbow_config.yaml",
-            verbose = False
+            verbose = False,
+            config_path: str = "configs/rainbow_config.yaml"
             ):
 
+        print("hey from agent")
+        print(config_path)
         # ------ load configs from "rainbow_config.yaml" ------
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
         self.configs = config
         self.__dict__.update(config)
-
-
+        print("hey from agent2")
         self.n_observations = n_observations
         self.n_actions = n_actions
         self.verbose = verbose
