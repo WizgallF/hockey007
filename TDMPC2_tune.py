@@ -11,6 +11,7 @@ best parameters even if the tuning run is interrupted.
 from __future__ import annotations
 
 import argparse
+import inspect
 import itertools
 import json
 import math
@@ -21,6 +22,7 @@ from typing import Any, Dict, List
 
 import numpy as np
 import torch
+import torch.optim as optim
 
 try:
     import wandb
@@ -224,11 +226,8 @@ def run_trial(
 
     env = make_env(args.env)
     try:
-        agent = TDMPC2Agent(
-            env.action_space,
-            env.observation_space,
-            config_overrides=dict(run.config),
-        )
+        cfg_dict = dict(run.config)
+        agent = _build_agent(env, cfg_dict)
         if args.num_episodes is not None:
             agent.NUM_EPISODES = int(args.num_episodes)
 
@@ -281,6 +280,78 @@ def write_best_yaml(
             yaml.safe_dump(payload, f, sort_keys=False)
 
     return yaml_path
+
+
+def _build_agent(env, cfg_dict: Dict[str, Any]):
+    sig = inspect.signature(TDMPC2Agent.__init__)
+    if "config_overrides" in sig.parameters:
+        return TDMPC2Agent(
+            env.action_space,
+            env.observation_space,
+            config_overrides=cfg_dict,
+        )
+
+    # Fallback for older TDMPC2Agent versions (no config_overrides)
+    agent = TDMPC2Agent(env.action_space, env.observation_space)
+
+    # Disallow model-shape changes without full re-init
+    incompatible = {"Z_DIM", "HIDDEN_DIM"}
+    if any(k in cfg_dict for k in incompatible):
+        raise RuntimeError(
+            "This TDMPC2Agent version does not support config_overrides. "
+            "Grid params include model-size keys (Z_DIM/HIDDEN_DIM). "
+            "Update TDMPC2Agent or remove those keys from the grid."
+        )
+
+    _apply_overrides_compat(agent, cfg_dict)
+    return agent
+
+
+def _apply_overrides_compat(agent: Any, cfg_dict: Dict[str, Any]) -> None:
+    if hasattr(agent, "configs") and isinstance(agent.configs, dict):
+        agent.configs.update(cfg_dict)
+    agent.__dict__.update(cfg_dict)
+
+    # Update horizon-dependent buffers if needed
+    if "TRAIN_HORIZON" in cfg_dict or "HORIZON" in cfg_dict:
+        agent.TRAIN_HORIZON = getattr(agent, "TRAIN_HORIZON", cfg_dict.get("TRAIN_HORIZON", 12))
+        agent.horizon = cfg_dict.get("HORIZON", agent.TRAIN_HORIZON)
+        agent._a_mean = torch.zeros(agent.horizon, agent.act_dim, device=agent.device)
+
+    # Recreate optimizers if optimizer hyperparams were overridden
+    if any(k in cfg_dict for k in ("LR", "ADAM_BETA_1", "ADAM_BETA_2", "ADAM_EPS")):
+        agent.LR = cfg_dict.get("LR", agent.LR)
+        agent.ADAM_BETA_1 = cfg_dict.get("ADAM_BETA_1", agent.ADAM_BETA_1)
+        agent.ADAM_BETA_2 = cfg_dict.get("ADAM_BETA_2", agent.ADAM_BETA_2)
+        agent.ADAM_EPS = cfg_dict.get("ADAM_EPS", agent.ADAM_EPS)
+        agent.optimizer = optim.Adam(
+            agent.model.parameters(),
+            lr=agent.LR,
+            betas=(agent.ADAM_BETA_1, agent.ADAM_BETA_2),
+            eps=agent.ADAM_EPS,
+        )
+
+    if "PI_LR" in cfg_dict:
+        agent.PI_LR = cfg_dict.get("PI_LR", agent.PI_LR)
+        agent.pi_optimizer = optim.Adam(agent.model.pi.parameters(), lr=agent.PI_LR)
+
+    # Recreate replay buffer if its construction params were overridden
+    if any(k in cfg_dict for k in ("CAPACITY", "PRIORITIZED", "ALPHA", "BETA", "EPSILON", "SEED")):
+        agent.CAPACITY = cfg_dict.get("CAPACITY", agent.CAPACITY)
+        agent.PRIORITIZED = cfg_dict.get("PRIORITIZED", agent.PRIORITIZED)
+        agent.ALPHA = cfg_dict.get("ALPHA", agent.ALPHA)
+        agent.BETA = cfg_dict.get("BETA", agent.BETA)
+        agent.EPSILON = cfg_dict.get("EPSILON", agent.EPSILON)
+        agent.SEED = cfg_dict.get("SEED", agent.SEED)
+        rb_cls = agent.replay_buffer.__class__
+        agent.replay_buffer = rb_cls(
+            capacity_steps=agent.CAPACITY,
+            prioritized=agent.PRIORITIZED,
+            alpha=agent.ALPHA,
+            beta=agent.BETA,
+            eps=agent.EPSILON,
+            seed=agent.SEED,
+        )
 
 
 def parse_args() -> argparse.Namespace:
