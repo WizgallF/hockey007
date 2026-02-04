@@ -7,6 +7,7 @@ import copy
 import math
 import time
 import yaml
+from pathlib import Path
 import os
 import json
 import random
@@ -29,12 +30,17 @@ class TDMPC2Agent(Agent):
             self,
             action_space,
             observation_space,
-            verbose = False
+            verbose = False,
+            config_overrides: dict | None = None
             ):
 
         # ------ load configs from "tdmpc_config.yaml" ------
-        with open("configs/tdmpc_config.yaml", 'r') as f:
+        repo_root = Path(__file__).resolve().parent.parent
+        config_path = repo_root / "configs" / "tdmpc_config.yaml"
+        with open(config_path, "r") as f:
             config = yaml.safe_load(f) or {}
+        if config_overrides:
+            config.update(config_overrides)
         self.configs = config
         self.__dict__.update(config)
 
@@ -48,6 +54,22 @@ class TDMPC2Agent(Agent):
             self.act_dim = int(action_space.n)
         else:
             self.act_dim = len(action_space)
+
+        # Action scaling helpers (assume continuous Box actions when available)
+        self._action_shape = getattr(action_space, "shape", None)
+        self._action_low = None
+        self._action_high = None
+        self._action_low_t = None
+        self._action_high_t = None
+        if hasattr(action_space, "low") and hasattr(action_space, "high"):
+            self._action_low = np.asarray(action_space.low, dtype=np.float32).reshape(-1)
+            self._action_high = np.asarray(action_space.high, dtype=np.float32).reshape(-1)
+            if self._action_low.size == self.act_dim and self._action_high.size == self.act_dim:
+                self._action_low_t = torch.as_tensor(self._action_low, device=self.device)
+                self._action_high_t = torch.as_tensor(self._action_high, device=self.device)
+            else:
+                self._action_low = None
+                self._action_high = None
 
         if hasattr(observation_space, "shape") and observation_space.shape is not None:
             self.obs_dim = int(np.prod(observation_space.shape))
@@ -137,7 +159,18 @@ class TDMPC2Agent(Agent):
             for p_targ, p in zip(self.target_model.parameters(), self.model.parameters()):
                 p_targ.data.mul_(1.0 - tau).add_(tau * p.data)
 
-    
+    def _unnormalize_action(self, a_tanh: torch.Tensor) -> torch.Tensor:
+        if self._action_low_t is None or self._action_high_t is None:
+            return a_tanh
+        return self._action_low_t + (a_tanh + 1.0) * 0.5 * (self._action_high_t - self._action_low_t)
+
+    def _normalize_action(self, action: np.ndarray) -> np.ndarray:
+        action = np.asarray(action, dtype=np.float32).reshape(-1)
+        if self._action_low is None or self._action_high is None:
+            return action
+        norm = 2.0 * (action - self._action_low) / (self._action_high - self._action_low + 1e-8) - 1.0
+        return np.clip(norm, -1.0, 1.0)
+
     @torch.no_grad()
     def act(self, env, state, episode_i, statistics) -> np.ndarray:
         # --- 0) prep tensors ---
@@ -152,14 +185,9 @@ class TDMPC2Agent(Agent):
         iters = self.MPC_ITERS
         act_dim = self.act_dim
 
-        # Determine env action bounds if they exist
-        low, high = None, None
-
         # Helper: map [-1,1] -> env bounds (if present)
         def unnormalize(a_tanh):
-            if low is None or high is None:
-                return a_tanh
-            return low + (a_tanh + 1.0) * 0.5 * (high - low)
+            return self._unnormalize_action(a_tanh)
 
         # Helper: discount vector [H]
         discounts = (self.GAMMA ** torch.arange(H, device=self.device, dtype=torch.float32)).view(1, H)
@@ -217,6 +245,8 @@ class TDMPC2Agent(Agent):
 
         # --- 6) convert to env action scale and return ---
         a_env = unnormalize(a).cpu().numpy()
+        if self._action_shape is not None and self._action_low is not None:
+            a_env = a_env.reshape(self._action_shape)
         return a_env
 
         
@@ -240,7 +270,8 @@ class TDMPC2Agent(Agent):
             terminated: Whether the episode has terminated after current transition
 
         """
-        self.replay_buffer.add(state, action, reward, next_state, terminated)
+        norm_action = self._normalize_action(action)
+        self.replay_buffer.add(state, norm_action, reward, next_state, terminated)
         
 
     
@@ -261,7 +292,7 @@ class TDMPC2Agent(Agent):
         B = self.BATCH_SIZE
 
         # Sample contiguous segments
-        obs, act, rew, done, isw, idxes = self.replay_buffer.sample(
+        obs, act, rew, done, isw, idxes = self.replay_buffer.sample_sequences(
             batch_size=B,
             horizon=H,
         )
@@ -350,10 +381,9 @@ class TDMPC2Agent(Agent):
                 pr = (t_w * td_err).mean(dim=1).detach().cpu().numpy()  # [B]
             self.replay_buffer.update_priorities(idxes, pr)
 
-    # ---- optional logging ----
-    # if statistics is not None:
-    #     statistics["loss_model"].append(float(loss_model.item()))
-    #     statistics["loss_pi"].append(float(pi_loss.item()))
+        # ---- logging ----
+        if statistics is not None and "tr_loss" in statistics:
+            statistics["tr_loss"].append(float(loss_model.detach().cpu().item()))
 
         
 
