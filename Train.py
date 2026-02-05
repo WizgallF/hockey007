@@ -8,6 +8,7 @@ from datetime import datetime
 import torch.optim as optim
 import matplotlib.pyplot as plt
 from itertools import count
+from Wrapper import Envwrapper
 
 
 class Training():
@@ -150,9 +151,120 @@ class Training():
         plt.close()
 
     
-    def train_self_play(self, *args, **kwargs):
-        pass
+    def train_self_play(
+            self, 
+            opponent,
+            discrete_actions = False):
 
+        torch.set_default_dtype(torch.float32)
+
+        self.original_env = self.env
+        self.opponent = opponent
+
+        # print hyperparameter settings to console 
+        if self.verbose:
+            self.agent.print_config()
+
+        # Create experiment folder and save config
+        self.experiment_path = self.agent.save_experiment_config(self.base_dir)
+
+
+
+        # Add random agent to population for self play
+        population_path = os.path.join(self.experiment_path, "agent_population")
+        self.save_to_population(self.opponent, population_path, i_training_round=0)
+        
+
+        start = time.time()
+        best_mv_avg_reward = float('-inf')
+
+
+        for i_training_round in range(self.agent.TRAINING_ROUNDS):
+
+            # Wrap environment with Player 2
+            player2 = self.select_from_population(population_path)
+            self.env = Envwrapper(self.original_env, player2, discrete_actions)
+
+            for i_episode in range(self.agent.NUM_EPISODES):
+                self.agent.cur_episode = i_episode
+
+                # --------- init environment -----------
+                state, info = self.env.reset()
+                
+                for t in count():
+
+                    # ------ act ------
+                    action = self.agent.act(self.env, state, i_episode, self.statistics)
+                    next_state, reward, terminated, truncated, _ = self.env.step(action)
+
+
+                    # ------ observe ------
+                    self.agent.observe(state, action, reward, next_state, terminated)
+                    self.statistics["ep_rew"][-1] += float(reward) 
+                    
+
+                    # ------ move to next state ------
+                    state = next_state
+
+
+                    # ------ update ------
+                    if i_episode >= self.agent.START_TRAINING:
+                        self.agent.update(self.statistics)
+
+                    # ------ terminate episode ------
+                    done = terminated or truncated
+                    if done:
+                        self.statistics["ep_rew"].append(0)
+                        break
+                
+
+
+                # TODO: how to determine which agent to save? just save them regularly?
+                """# ------ save best performing agent ------
+                n = len(self.statistics["ep_rew"]) 
+                if n > self.mavg_window_size + 1:
+                    mv_avg_reward = np.mean(self.statistics["ep_rew"][-self.mavg_window_size:-1])
+                    self.statistics["mv_avg_rew"].append(mv_avg_reward)
+                    if mv_avg_reward > best_mv_avg_reward:
+                        self.agent.save_dict(self.experiment_path)
+                        best_mv_avg_reward = mv_avg_reward
+                        if self.verbose:
+                            print(f"Saved model with moving average reward: {mv_avg_reward}")"""
+
+
+                # ------ print to console -----
+                if self.verbose and i_episode % 5 == 0:
+                    end = time.time()
+                    print(f"\n** after {self.agent.NUM_EPISODES* i_training_round + i_episode} th episode in {i_training_round} th training round - {end - start:.5f} sec passed**\n")
+
+            self.save_to_population(self.agent, population_path)
+            
+            
+
+        self.save_data()
+
+        if type(self.agent) == RainbowAgent:
+            self.save_q_values()
+
+    def save_to_polulation(
+            self,
+            population_path,
+            i_training_round):
+
+        os.makedirs(population_path, exist_ok=True)
+        self.opponent.save_dict(population_path, identifier_extension=f"_{i_training_round}")
     
+    def select_from_population(
+            self,
+            population_path):
+        
+        N = len(os.listdir(population_path))
+        agent_index = np.random.randint(0, N-1)
+        load_path = os.path.join(population_path, self.opponent.MODEL_IDENTIFIER + f"_{agent_index}") + ".pth"
+        self.opponent.load_dict(load_path)
+
+
+
+
     def save(self, *args, **kwargs):
         pass

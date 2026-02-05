@@ -339,15 +339,18 @@ class RainbowAgent(Agent):
 
     def save_dict(
             self,
-            save_path: str = ""
+            save_path: str = "",
+            identifier_extension: str = ""
             ):
         """
         Save the models state dict to specified path.
         ----------
         Parameter:
             save_path: The path where the model's state dictionary will be saved
+            identifier_extension: Add additional information to the filename
         """
-        saving_dir = os.path.join(save_path, self.MODEL_IDENTIFIER + ".pth")
+
+        saving_dir = os.path.join(save_path, self.MODEL_IDENTIFIER + identifier_extension + ".pth")
         torch.save(self.policy_net.state_dict(), saving_dir)
     
     

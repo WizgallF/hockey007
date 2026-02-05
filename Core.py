@@ -72,8 +72,43 @@ class Core:
     def evaluate(self):
         pass
 
-    def train_self_play(self):
-        pass
+    def train_agent_self_play(
+            self, 
+            agent_name: str = None, 
+            env_name: str = None, 
+            base_dir = "experiments",
+            save_intermediate_agents: bool = False,
+            verbose=False,
+            bins = 5):
+        
+        print(agent_name)
+            
+        if env_name == "Hockey-One-v0":
+            env = h_env.HockeyEnv()
+            if agent_name == "rainbow":
+                proxy_env = DiscreteActionWrapperHockey(env)
+                n_actions = proxy_env.action_space.n
+            state, info = proxy_env.reset()
+            n_observations = len(state)
+
+    
+        if agent_name == "rainbow": 
+            agent = RainbowAgent(
+                n_observations,
+                n_actions,
+                verbose)
+            opponent = RainbowAgent(
+                n_observations,
+                n_actions,
+                verbose)
+        else:
+            raise NotImplementedError
+        
+
+        
+        train_class = Training(agent, env, base_dir, save_intermediate_agents, verbose)
+        discrete_actions = agent_name == "rainbow"
+        train_class.train_self_play(opponent, discrete_actions)
 
     def agent_against_human(self):
         pass

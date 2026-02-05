@@ -14,6 +14,7 @@ def main ():
     parser = argparse.ArgumentParser()
 
     parser.add_argument ( '--train', default=False, action="store_true", help="Train an agent in a specified environment" )
+    parser.add_argument ( '--train_self_play', default=False, action="store_true", help="Train an agent in a specified environment to play against past versions of itself" )
     parser.add_argument ( '--play', default=False, action="store_true", help="Let an agent play against the basic opponent" )
     parser.add_argument ( '--agent', type=str, default="rainbow", help = "Specify the agent to use for training/evaluation")
 
@@ -35,6 +36,10 @@ def main ():
 
     if args.train:
         core.train_agent(args.agent, args.env, args.base_dir, args.int_agents, args.verbose)
+
+    elif args.train_self_play:
+        core.train_agent_self_play(args.agent, args.env, args.base_dir, args.int_agents, args.verbose)
+
     elif args.play:        
         core.play(
             environment=args.env, 

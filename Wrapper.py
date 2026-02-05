@@ -2,25 +2,34 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 import hockey.hockey_env as h_env
+from agents.RainbowAgent import RainbowAgent
 
 
 class Envwrapper():
     def __init__(
             self,
             env,
-            name,
-            player2):
+            player2,
+            discrete_actions = False):
         self.env = env
-        self.name = name
         self.player2 = self._resolve_player(player2)
+        self.discrete_actions = discrete_actions
 
     def reset(self):
         return self.env.reset()
 
     def step(self, action_p1):
         obs_agent2 = self.env.obs_agent_two()
-        action_p2 = self.player2.act(obs_agent2)
-        return self.env.step(np.hstack([action_p1, action_p2]))
+
+        if isinstance(self.player2, RainbowAgent):
+            action_p2 = self.player2.act(env=self.env, state=obs_agent2, greedy=True)
+        else:
+            action_p2 = self.player2.act(obs_agent2)
+
+        if self.discrete_actions:
+            return self.env.step(np.hstack([self._convert_action(action_p1), self._convert_action(action_p2)]))
+        else:
+            return self.env.step(np.hstack([action_p1, action_p2]))
 
 
     def _resolve_player(self, player):
@@ -32,7 +41,18 @@ class Envwrapper():
                 return h_env.BasicOpponent(weak=False)
             if key in {"weakopp", "weakopponent"}:
                 return h_env.BasicOpponent(weak=True)
-        return player
+        if isinstance(player, RainbowAgent):
+            return player
+        
+    def _convert_action(discrete_action):
+        action_cont = [(discrete_action == 1) * -1.0 + (discrete_action == 2) * 1.0,  # player x
+                   (discrete_action == 3) * -1.0 + (discrete_action == 4) * 1.0,  # player y
+                   (discrete_action == 5) * -1.0 + (discrete_action == 6) * 1.0]  # player angle
+        
+        action_cont.append((discrete_action == 7) * 1.0)
+
+        return action_cont
+
     
 
 class DiscreteActionWrapperPendulum(gym.ActionWrapper):
