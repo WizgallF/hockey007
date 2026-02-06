@@ -17,6 +17,7 @@ def main ():
     parser.add_argument ( '--train_self_play', default=False, action="store_true", help="Train an agent in a specified environment to play against past versions of itself" )
     parser.add_argument ( '--play', default=False, action="store_true", help="Let an agent play against the basic opponent" )
     parser.add_argument ( '--agent', type=str, default="rainbow", help = "Specify the agent to use for training/evaluation")
+    parser.add_argument ( '--num_parallel_envs', type=int, default=1, help = "Number of parallel environments to use during training")
 
     parser.add_argument ( '--playagent_1_type', type=str, default="rainbow", help = "Specify the agent 1 to use for evaluation")
     parser.add_argument ( '--playagent1_path', type=str, default="/home/nils-klute/Documents/machine_learning/Reinforcement Learning/hockey007/saved_agents/rainbow.pth", help = "Path to the trained agent 1 for evaluation")
@@ -35,7 +36,14 @@ def main ():
     core = Core()
 
     if args.train:
-        core.train_agent(args.agent, args.env, args.base_dir, args.int_agents, args.verbose)
+        core.train_agent(
+            args.agent, 
+            args.env, 
+            args.base_dir, 
+            args.int_agents, 
+            args.verbose,
+            args.num_parallel_envs
+            )
 
     elif args.train_self_play:
         core.train_agent_self_play(args.agent, args.env, args.base_dir, args.int_agents, args.verbose)

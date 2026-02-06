@@ -23,25 +23,49 @@ class Core:
             base_dir = "experiments",
             save_intermediate_agents: bool = False,
             verbose=False,
-            bins = 5):
+            bins = 5,
+            num_parallel_envs = 1):
         
         print(agent_name)
         
         if env_name == "Pendulum-v1":
-            env = gym.make(env_name)
-            if agent_name == "rainbow":
-                env = DiscreteActionWrapperPendulum(env, bins)
-                n_actions = env.action_space.n
-            state, info = env.reset()
-            n_observations = len(state)
-            
+            def make_env():
+                return gym.make(env_name)
         elif env_name == "Hockey-One-v0":
-            env = gym.envs.make("Hockey-One-v0", mode=0, weak_opponent=True)
+            def make_env():
+                return gym.envs.make("Hockey-One-v0", mode=0, weak_opponent=True)
+        else:
+            raise NotImplementedError
+
+        if num_parallel_envs > 1:
             if agent_name == "rainbow":
-                env = DiscreteActionWrapperHockey(env)
-                n_actions = env.action_space.n
-            state, info = env.reset()
+                if env_name == "Pendulum-v1":
+                    env = gym.vector.SyncVectorEnv(
+                        [lambda: DiscreteActionWrapperPendulum(make_env(), bins) for _ in range(num_parallel_envs)]
+                    )
+                else:
+                    env = gym.vector.SyncVectorEnv(
+                        [lambda: DiscreteActionWrapperHockey(make_env()) for _ in range(num_parallel_envs)]
+                    )
+            else:
+                env = gym.vector.SyncVectorEnv([make_env for _ in range(num_parallel_envs)])
+            base_obs_space = env.single_observation_space
+            base_act_space = env.single_action_space
+        else:
+            env = make_env()
+            if agent_name == "rainbow":
+                env = DiscreteActionWrapperPendulum(env, bins) if env_name == "Pendulum-v1" else DiscreteActionWrapperHockey(env)
+            base_obs_space = env.observation_space
+            base_act_space = env.action_space
+
+        state, info = env.reset()
+        if num_parallel_envs > 1:
+            n_observations = len(state[0])
+        else:
             n_observations = len(state)
+
+        if agent_name == "rainbow":
+            n_actions = base_act_space.n
 
     
         if agent_name == "rainbow": 
@@ -51,13 +75,13 @@ class Core:
                 verbose)
         elif agent_name == "ddpg":
             agent = DDPGAgent(
-                env.observation_space,
-                env.action_space,
+                base_obs_space,
+                base_act_space,
                 verbose=verbose)
         elif agent_name == "tdmpc2":
             agent =  TDMPC2Agent(
-                env.action_space,
-                env.observation_space
+                base_act_space,
+                base_obs_space
             )
         else:
             raise NotImplementedError
@@ -227,4 +251,3 @@ class Core:
 
         return action_cont
     
-

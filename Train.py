@@ -55,56 +55,123 @@ class Training():
         start = time.time()
         best_mv_avg_reward = float('-inf')
 
-        for i_episode in range(self.agent.NUM_EPISODES):
-            self.agent.cur_episode = i_episode
+        is_vector_env = hasattr(self.env, "num_envs")
+        if not is_vector_env:
+            for i_episode in range(self.agent.NUM_EPISODES):
+                self.agent.cur_episode = i_episode
 
-            # --------- init environment -----------
+                # --------- init environment -----------
+                state, info = self.env.reset()
+                
+                for t in count():
+
+                    # ------ act ------
+                    action = self.agent.act(self.env, state, i_episode, self.statistics)
+                    next_state, reward, terminated, truncated, _ = self.env.step(action)
+
+
+                    # ------ observe ------
+                    self.agent.observe(state, action, reward, next_state, terminated)
+                    self.statistics["ep_rew"][-1] += float(reward) 
+                    
+
+                    # ------ move to next state ------
+                    state = next_state
+
+
+                    # ------ update ------
+                    if i_episode >= self.agent.START_TRAINING:
+                        self.agent.update(self.statistics)
+
+                    # ------ terminate episode ------
+                    done = terminated or truncated
+                    if done:
+                        self.statistics["ep_rew"].append(0)
+                        break
+                
+
+
+                # ------ save best performing agent ------
+                n = len(self.statistics["ep_rew"]) 
+                if n > self.mavg_window_size + 1:
+                    mv_avg_reward = np.mean(self.statistics["ep_rew"][-self.mavg_window_size:-1])
+                    self.statistics["mv_avg_rew"].append(mv_avg_reward)
+                    if mv_avg_reward > best_mv_avg_reward:
+                        self.agent.save_dict(self.experiment_path)
+                        best_mv_avg_reward = mv_avg_reward
+                        if self.verbose:
+                            print(f"Saved model with moving average reward: {mv_avg_reward}")
+
+
+                # ------ print to console -----
+                if self.verbose and i_episode % 5 == 0:
+                    end = time.time()
+                    print(f"\n** after {i_episode} th episode - {end - start:.5f} sec passed**\n")
+        else:
+            num_envs = int(self.env.num_envs)
+            assert type(self.agent).__name__ == "DDPGAgent", (
+                "Parallel training is only supported for DDPGAgent."
+            )
+            ep_rew_per_env = np.zeros(num_envs, dtype=np.float32)
             state, info = self.env.reset()
-            
-            for t in count():
+            episodes_finished = 0
+
+            while episodes_finished < self.agent.NUM_EPISODES:
+                self.agent.cur_episode = episodes_finished
 
                 # ------ act ------
-                action = self.agent.act(self.env, state, i_episode, self.statistics)
-                next_state, reward, terminated, truncated, _ = self.env.step(action)
+                action = self.agent.act(self.env, state, episodes_finished, self.statistics)
 
+                next_state, reward, terminated, truncated, _ = self.env.step(action)
 
                 # ------ observe ------
                 self.agent.observe(state, action, reward, next_state, terminated)
-                self.statistics["ep_rew"][-1] += float(reward) 
-                
+                ep_rew_per_env += reward.astype(np.float32)
 
                 # ------ move to next state ------
                 state = next_state
 
-
                 # ------ update ------
-                if i_episode >= self.agent.START_TRAINING:
+                if episodes_finished >= self.agent.START_TRAINING:
                     self.agent.update(self.statistics)
 
-                # ------ terminate episode ------
-                done = terminated or truncated
-                if done:
-                    self.statistics["ep_rew"].append(0)
-                    break
-            
+                # ------ terminate episodes ------
+                done = np.logical_or(terminated, truncated)
+                if np.any(done):
+                    done_indices = np.where(done)[0]
+                    for env_idx in done_indices:
+                        self.statistics["ep_rew"].append(float(ep_rew_per_env[env_idx]))
+                        ep_rew_per_env[env_idx] = 0.0
 
+                    # Reset only completed environments if supported
+                    if hasattr(self.env, "reset_done"):
+                        reset_obs, reset_info = self.env.reset_done()
+                        if isinstance(reset_obs, np.ndarray) and reset_obs.shape == state.shape:
+                            state = np.where(done[:, None], reset_obs, state)
+                        else:
+                            for idx, env_idx in enumerate(done_indices):
+                                state[env_idx] = reset_obs[idx]
+                    else:
+                        state, info = self.env.reset()
 
-            # ------ save best performing agent ------
-            n = len(self.statistics["ep_rew"]) 
-            if n > self.mavg_window_size + 1:
-                mv_avg_reward = np.mean(self.statistics["ep_rew"][-self.mavg_window_size:-1])
-                self.statistics["mv_avg_rew"].append(mv_avg_reward)
-                if mv_avg_reward > best_mv_avg_reward:
-                    self.agent.save_dict(self.experiment_path)
-                    best_mv_avg_reward = mv_avg_reward
-                    if self.verbose:
-                        print(f"Saved model with moving average reward: {mv_avg_reward}")
+                # ------ save best performing agent ------
+                n = len(self.statistics["ep_rew"]) 
+                episodes_finished = n - 1
+                if n > self.mavg_window_size + 1:
+                    mv_avg_reward = np.mean(self.statistics["ep_rew"][-self.mavg_window_size:-1])
+                    self.statistics["mv_avg_rew"].append(mv_avg_reward)
+                    if mv_avg_reward > best_mv_avg_reward:
+                        self.agent.save_dict(self.experiment_path)
+                        best_mv_avg_reward = mv_avg_reward
+                        if self.verbose:
+                            print(f"Saved model with moving average reward: {mv_avg_reward}")
 
-
-            # ------ print to console -----
-            if self.verbose and i_episode % 5 == 0:
-                end = time.time()
-                print(f"\n** after {i_episode} th episode - {end - start:.5f} sec passed**\n")
+                # ------ print to console -----
+                if self.verbose and episodes_finished % 5 == 0:
+                    end = time.time()
+                    print(
+                        f"\n** after {episodes_finished} th episode - {end - start:.5f} sec passed**\n"
+                    )
             
 
         self.save_data()

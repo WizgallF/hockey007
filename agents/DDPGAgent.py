@@ -229,12 +229,24 @@ class DDPGAgent(Agent):
         if eps is None:
             eps = self._eps
 
-        state_t = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
+        if state.ndim == 1:
+            state_t = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
+            with torch.no_grad():
+                raw_action = self.policy(state_t).squeeze(0).cpu().numpy()
+
+            if not greedy:
+                raw_action = raw_action + eps * self.action_noise()
+            raw_action = np.clip(raw_action, -1.0, 1.0)
+            return self._scale_action_np(raw_action)
+
+        # Vectorized path for parallel environments: state shape (N, obs_dim)
+        state_t = torch.tensor(state, dtype=torch.float32, device=self.device)
         with torch.no_grad():
-            raw_action = self.policy(state_t).squeeze(0).cpu().numpy()
+            raw_action = self.policy(state_t).cpu().numpy()
 
         if not greedy:
-            raw_action = raw_action + eps * self.action_noise()
+            noise = np.stack([self.action_noise() for _ in range(raw_action.shape[0])], axis=0)
+            raw_action = raw_action + eps * noise
         raw_action = np.clip(raw_action, -1.0, 1.0)
         return self._scale_action_np(raw_action)
 
@@ -246,14 +258,31 @@ class DDPGAgent(Agent):
         next_state: np.ndarray,
         terminated: bool,
     ) -> None:
-        transition = (
-            np.asarray(state, dtype=np.float32),
-            np.asarray(action, dtype=np.float32),
-            float(reward),
-            np.asarray(next_state, dtype=np.float32),
-            float(terminated),
-        )
-        self.buffer.add_transition(transition)
+        state = np.asarray(state, dtype=np.float32)
+        action = np.asarray(action, dtype=np.float32)
+        next_state = np.asarray(next_state, dtype=np.float32)
+
+        if state.ndim == 1:
+            transition = (
+                state,
+                action,
+                float(reward),
+                next_state,
+                float(terminated),
+            )
+            self.buffer.add_transition(transition)
+            return
+
+        # Vectorized path for parallel environments
+        for idx in range(state.shape[0]):
+            transition = (
+                state[idx],
+                action[idx],
+                float(reward[idx]),
+                next_state[idx],
+                float(terminated[idx]),
+            )
+            self.buffer.add_transition(transition)
 
     def update(self, statistics: dict[str, list] | None = None) -> list[tuple[float, float]] | None:
         last_critic_loss = None
