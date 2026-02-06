@@ -33,18 +33,26 @@ class QFunction(DDPGNetwork):
         hidden_sizes: list[int] | tuple[int, ...] = (256, 256),
         learning_rate: float = 0.0002,
         activation_fun: torch.nn.Module | None = None,
+        num_quantiles: int = 1,
     ):
         if activation_fun is None:
             activation_fun = torch.nn.ReLU()
         super().__init__(
             input_size=observation_dim + action_dim,
             hidden_sizes=list(hidden_sizes),
-            output_size=1,
+            output_size=num_quantiles,
             activation_fun=activation_fun,
             output_activation=None,
         )
         self.optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate, eps=1e-6)
-        self.loss = torch.nn.SmoothL1Loss()
+        self._num_quantiles = int(num_quantiles)
+        if self._num_quantiles == 1:
+            self.loss = torch.nn.SmoothL1Loss()
+        else:
+            taus = (torch.arange(self._num_quantiles, dtype=torch.float32) + 0.5) / float(
+                self._num_quantiles
+            )
+            self.register_buffer("taus", taus)
 
     def fit(
         self,
@@ -55,7 +63,15 @@ class QFunction(DDPGNetwork):
         self.train()
         self.optimizer.zero_grad()
         pred = self.Q_value(observations, actions)
-        loss = self.loss(pred, targets)
+        if self._num_quantiles == 1:
+            loss = self.loss(pred, targets)
+        else:
+            # Quantile Huber loss: pred [B,N], targets [B,M]
+            td = targets.unsqueeze(1) - pred.unsqueeze(2)
+            abs_td = td.abs()
+            huber = torch.where(abs_td <= 1.0, 0.5 * td**2, abs_td - 0.5)
+            tau = self.taus.view(1, self._num_quantiles, 1)
+            loss = (torch.abs(tau - (td.detach() < 0).float()) * huber).mean()
         loss.backward()
         self.optimizer.step()
         return float(loss.detach().cpu().item())
@@ -126,6 +142,12 @@ class DDPGAgent(Agent):
         self.NUM_EPISODES = self._config["NUM_EPISODES"]
         self.START_TRAINING = self._config["START_TRAINING"]
         self._eps = self._config["EPS"]
+        self._use_distributional = bool(self._config["USE_DISTRIBUTIONAL"])
+        self._num_quantiles = int(self._config["NUM_QUANTILES"])
+        self._tqc_top_k = int(self._config["TQC_TOP_K"])
+
+        if self._use_distributional and self._num_quantiles < 2:
+            raise ValueError("NUM_QUANTILES must be >= 2 when USE_DISTRIBUTIONAL is True.")
 
         self._action_low = np.asarray(self._action_space.low, dtype=np.float32)
         self._action_high = np.asarray(self._action_space.high, dtype=np.float32)
@@ -144,12 +166,14 @@ class DDPGAgent(Agent):
             action_dim=self._action_n,
             hidden_sizes=self._config["HIDDEN_SIZES_CRITIC"],
             learning_rate=self._config["LEARNING_RATE_CRITIC"],
+            num_quantiles=self._num_quantiles if self._use_distributional else 1,
         ).to(self.device)
         self.Q_target = QFunction(
             observation_dim=self._obs_dim,
             action_dim=self._action_n,
             hidden_sizes=self._config["HIDDEN_SIZES_CRITIC"],
             learning_rate=0.0,
+            num_quantiles=self._num_quantiles if self._use_distributional else 1,
         ).to(self.device)
         if self._config["TWIN_DELAYED"]:
             self.Q2 = QFunction(
@@ -157,12 +181,14 @@ class DDPGAgent(Agent):
                 action_dim=self._action_n,
                 hidden_sizes=self._config["HIDDEN_SIZES_CRITIC"],
                 learning_rate=self._config["LEARNING_RATE_CRITIC"],
+                num_quantiles=self._num_quantiles if self._use_distributional else 1,
             ).to(self.device)
             self.Q2_target = QFunction(
                 observation_dim=self._obs_dim,
                 action_dim=self._action_n,
                 hidden_sizes=self._config["HIDDEN_SIZES_CRITIC"],
                 learning_rate=0.0,
+                num_quantiles=self._num_quantiles if self._use_distributional else 1,
             ).to(self.device)
 
         self.policy = DDPGNetwork(
@@ -322,7 +348,15 @@ class DDPGAgent(Agent):
                     if self._config["TWIN_DELAYED"]:
                         q1_prime = self.Q_target.Q_value(s_prime, next_actions)
                         q2_prime = self.Q2_target.Q_value(s_prime, next_actions)
-                        q_prime = torch.min(q1_prime, q2_prime)
+                        if self._use_distributional:
+                            q_prime = torch.cat([q1_prime, q2_prime], dim=1)
+                            q_prime, _ = torch.sort(q_prime, dim=1)
+                            max_drop = max(q_prime.shape[1] - 1, 0)
+                            drop_k = min(self._tqc_top_k, max_drop)
+                            if drop_k > 0:
+                                q_prime = q_prime[:, :-drop_k]
+                        else:
+                            q_prime = torch.min(q1_prime, q2_prime)
                     else:
                         q_prime = self.Q_target.Q_value(s_prime, next_actions)
                 #else:
@@ -440,6 +474,9 @@ class DDPGAgent(Agent):
             "POLICY_NOISE",
             "NOISE_CLIP",
             "POLICY_DELAY",
+            "USE_DISTRIBUTIONAL",
+            "NUM_QUANTILES",
+            "TQC_TOP_K",
         ]
         missing = [key for key in required if key not in config]
         if missing:
