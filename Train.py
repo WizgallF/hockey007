@@ -9,6 +9,8 @@ import torch.optim as optim
 import matplotlib.pyplot as plt
 from itertools import count
 from Wrapper import Envwrapper
+import hockey.hockey_env as h_env
+from copy import deepcopy
 
 
 class Training():
@@ -227,6 +229,7 @@ class Training():
 
         self.original_env = self.env
         self.opponent = opponent
+        self.best_opponent = deepcopy(opponent)
 
         # print hyperparameter settings to console 
         if self.verbose:
@@ -304,7 +307,9 @@ class Training():
                     end = time.time()
                     print(f"\n** after {self.agent.NUM_EPISODES* i_training_round + i_episode} th episode in {i_training_round} th training round - {end - start:.5f} sec passed**\n")
 
-            self.save_to_population(population_path, i_training_round)
+            if True: # self.agent_against_agent_eval(self.agent, self.best_opponent) > 0.5 or True: set this condition active!!!!
+                self.best_opponent = deepcopy(self.agent)
+                self.save_to_population(population_path, i_training_round)
             
             
 
@@ -312,6 +317,96 @@ class Training():
 
         if type(self.agent) == RainbowAgent:
             self.save_q_values()
+
+        
+        self.evaluate_agents(population_path)
+
+    def evaluate_agents(
+            self,
+            population_path):
+        
+        N = len(os.listdir(population_path))
+
+        results = []
+        start = time.time()
+        for i in range(N):
+            end = time.time()
+            print(f"eval agents against opponent {i}, {end-start} seconds passed")
+            agent_against_i_opponent = []
+
+            for j in range(i+1, N):
+                agent_load_path = os.path.join(population_path, self.opponent.MODEL_IDENTIFIER + f"_{j}") + ".pth"
+                opponent_load_path = os.path.join(population_path, self.opponent.MODEL_IDENTIFIER + f"_{i}") + ".pth"
+
+                self.agent.load_dict(agent_load_path)
+                self.opponent.load_dict(opponent_load_path)
+
+                agent_won_proportion = self.agent_against_agent_eval(self.agent, self.opponent)
+                
+                agent_against_i_opponent.append(agent_won_proportion)
+
+            results.append(agent_against_i_opponent)
+
+        print(results)
+
+
+        # TODO: make population path self argument
+
+    def agent_against_agent_eval(
+            self, 
+            player1, 
+            player2,
+            environment = 'Hockey-One-v0',
+            num_episodes = 100):
+        
+        if environment == 'Hockey-One-v0':
+            env = h_env.HockeyEnv()
+            obs, info = env.reset()
+            obs_agent2 = env.obs_agent_two()
+            score = {"player1": 0, "player2": 0}
+
+            for _ in range(num_episodes):
+                d = False
+                obs, info = env.reset()
+                while not d:
+                    
+                    if type(player1) == RainbowAgent:
+                        discrete_action = player1.act(env=env, state=obs, greedy=True) 
+                        a1 = self._discrete_to_continuous(discrete_action)
+                    else:
+                        a1 = player1.act(obs) 
+
+                    if type(player2) == RainbowAgent:
+                        discrete_action = player2.act(env=env, state=obs_agent2, greedy=True) 
+                        a2 = self._discrete_to_continuous(discrete_action)
+                    else:
+                        a2 = player2.act(obs_agent2)
+
+                    obs, r, d, _, info = env.step(np.hstack([a1,a2]))   
+                    obs_agent2 = env.obs_agent_two()
+                if info["winner"] == 1:
+                    score["player1"] += 1
+                else:
+                    score["player2"] += 1
+
+        env.close()
+
+        return score["player1"]/num_episodes
+    
+    def _discrete_to_continuous(self, discrete_action):
+        """ discrete actions from 0 to 7
+        Args:
+            action: The discrete action
+        Returns:
+            continuous action
+        """
+        action_cont = [(discrete_action == 1) * -1.0 + (discrete_action == 2) * 1.0,  # player x
+                   (discrete_action == 3) * -1.0 + (discrete_action == 4) * 1.0,  # player y
+                   (discrete_action == 5) * -1.0 + (discrete_action == 6) * 1.0]  # player angle
+        
+        action_cont.append((discrete_action == 7) * 1.0)
+
+        return action_cont
 
     def save_to_population(
             self,

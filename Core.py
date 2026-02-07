@@ -137,8 +137,6 @@ class Core:
     def agent_against_human(self):
         pass
 
-    def agent_against_agent_eval(self, agent1, agent2):
-        pass
 
     def play(
             self,

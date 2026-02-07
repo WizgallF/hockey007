@@ -96,6 +96,9 @@ class DiscreteActionWrapperHockey(gym.ActionWrapper):
         Returns:
             continuous action
         """
+        if isinstance(discrete_action, np.ndarray):
+            discrete_action = discrete_action.item()
+
         action_cont = [(discrete_action == 1) * -1.0 + (discrete_action == 2) * 1.0,  # player x
                    (discrete_action == 3) * -1.0 + (discrete_action == 4) * 1.0,  # player y
                    (discrete_action == 5) * -1.0 + (discrete_action == 6) * 1.0]  # player angle

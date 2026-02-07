@@ -25,14 +25,12 @@ class RainbowAgent(Agent):
             config_path: str = "configs/rainbow_config.yaml"
             ):
 
-        print("hey from agent")
         print(config_path)
         # ------ load configs from "rainbow_config.yaml" ------
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
         self.configs = config
         self.__dict__.update(config)
-        print("hey from agent2")
         self.n_observations = n_observations
         self.n_actions = n_actions
         self.verbose = verbose
@@ -93,7 +91,10 @@ class RainbowAgent(Agent):
             Integer specifying the selected action.
         """
 
-        state = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
+        state = torch.tensor(state, dtype=torch.float32, device=self.device)
+        if state.ndim == 1:
+            state = state.unsqueeze(0)
+
         sample = random.random()
         eps_threshold = self.EPS_END + (self.EPS_START - self.EPS_END) * \
             math.exp(-1. * i_episode * 0.69 / (self.EPS_DECAY * self.NUM_EPISODES)) # after EPS_DECAY proportion of episodes, the schedule divides eps/2 as ln(1/2) = -0.69
@@ -102,23 +103,34 @@ class RainbowAgent(Agent):
 
             # ------ greedy action selection ------
             if self.DISTRIBUTIONAL_Q:
-
-                logits = self.policy_net(state)                          
+                with torch.no_grad():
+                    logits = self.policy_net(state)                          
                 self.support = self.support.to(logits.device)
 
                 probs  = torch.softmax(logits, dim=-1)
                 q_vals = (probs * self.support.view(1, 1, -1)).sum(-1)
 
-                return q_vals.argmax(dim=1).squeeze().item()
+                if state.ndim == 1:
+                    return q_vals.argmax(dim=1).squeeze().item()
+                else:
+                    q_vals.argmax(dim=1).squeeze().detach().cpu().numpy()
             
             else:
-                q_values = self.policy_net(state)
-                return torch.argmax(q_values).detach().item()
+                with torch.no_grad():
+                    q_values = self.policy_net(state)
+                if state.ndim == 1:
+                    return torch.argmax(q_values).detach().item()
+                else:
+                    return torch.argmax(q_values, dim=1).detach().cpu().numpy()
         else:
 
             # ------ random action sampling from environment ------
-            return torch.tensor([[env.action_space.sample()]], device=self.device, dtype=torch.long).item()
-        
+            if state.ndim == 1:
+                return env.action_space.sample()
+            else:
+                random_actions = [env.action_space.sample() for _ in range(state.shape[0])]
+                return np.asarray(random_actions)
+            
 
     def observe(
             self,
@@ -139,8 +151,11 @@ class RainbowAgent(Agent):
             terminated: Whether the episode has terminated after current transition
 
         """
-
-        self.replay_buffer.add(np.expand_dims(state, axis=0), np.asarray(action).squeeze(), np.asarray([reward]), np.expand_dims(next_state, axis=0), int(terminated))
+        if state.ndim == 1:
+            self.replay_buffer.add(np.expand_dims(state, axis=0), np.asarray(action).squeeze(), np.asarray([reward]), np.expand_dims(next_state, axis=0), int(terminated))
+        else:
+            for idx in range(state.shape[0]):
+                self.replay_buffer.add(np.expand_dims(state[idx], axis=0), np.asarray(action[idx]).squeeze(), np.asarray([reward[idx]]), np.expand_dims(next_state[idx], axis=0), int(terminated[idx]))
 
     
     def update(
