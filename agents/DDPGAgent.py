@@ -218,6 +218,8 @@ class DDPGAgent(Agent):
     def _copy_nets(self) -> None:
         self.Q_target.load_state_dict(self.Q.state_dict())
         self.policy_target.load_state_dict(self.policy.state_dict())
+        if self._config["TWIN_DELAYED"]:
+            self.Q2_target.load_state_dict(self.Q2.state_dict())
 
     def _soft_update(self, tau: float) -> None:
         with torch.no_grad():
@@ -225,6 +227,9 @@ class DDPGAgent(Agent):
                 target_param.data.mul_(1 - tau).add_(tau * param.data)
             for target_param, param in zip(self.policy_target.parameters(), self.policy.parameters()):
                 target_param.data.mul_(1 - tau).add_(tau * param.data)
+            if self._config["TWIN_DELAYED"]:
+                for target_param, param in zip(self.Q2_target.parameters(), self.Q2.parameters()):
+                    target_param.data.mul_(1 - tau).add_(tau * param.data)
 
     def _scale_action_np(self, action: np.ndarray) -> np.ndarray:
         return self._action_low + (action + 1.0) * 0.5 * (self._action_high - self._action_low)
@@ -408,16 +413,17 @@ class DDPGAgent(Agent):
 
     def save_dict(self, save_path: str = "") -> None:
         saving_dir = os.path.join(save_path, f"{self.MODEL_IDENTIFIER}.pth")
-        torch.save(
-            {
-                "policy": self.policy.state_dict(),
-                "critic": self.Q.state_dict(),
-                "policy_target": self.policy_target.state_dict(),
-                "critic_target": self.Q_target.state_dict(),
-                "config": self._config,
-            },
-            saving_dir,
-        )
+        payload = {
+            "policy": self.policy.state_dict(),
+            "critic": self.Q.state_dict(),
+            "policy_target": self.policy_target.state_dict(),
+            "critic_target": self.Q_target.state_dict(),
+            "config": self._config,
+        }
+        if self._config["TWIN_DELAYED"]:
+            payload["critic2"] = self.Q2.state_dict()
+            payload["critic2_target"] = self.Q2_target.state_dict()
+        torch.save(payload, saving_dir)
 
     def load_dict(self, load_path: str = "") -> None:
         checkpoint = torch.load(load_path, map_location=self.device)
@@ -429,6 +435,13 @@ class DDPGAgent(Agent):
                 self.Q_target.load_state_dict(checkpoint["critic_target"])
             else:
                 self._copy_nets()
+            if self._config["TWIN_DELAYED"]:
+                if "critic2" in checkpoint:
+                    self.Q2.load_state_dict(checkpoint["critic2"])
+                if "critic2_target" in checkpoint:
+                    self.Q2_target.load_state_dict(checkpoint["critic2_target"])
+                else:
+                    self.Q2_target.load_state_dict(self.Q2.state_dict())
             return
 
         self.policy.load_state_dict(checkpoint)
