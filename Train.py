@@ -239,7 +239,7 @@ class Training():
 
         # Add random agent to population for self play
         population_path = os.path.join(self.experiment_path, "agent_population")
-        self.save_to_population(self.opponent, population_path, i_training_round=0)
+        self.save_to_population(population_path, i_training_round=0)
         
 
         start = time.time()
@@ -249,8 +249,8 @@ class Training():
         for i_training_round in range(self.agent.TRAINING_ROUNDS):
 
             # Wrap environment with Player 2
-            player2 = self.select_from_population(population_path)
-            self.env = Envwrapper(self.original_env, player2, discrete_actions)
+            self.select_from_population(population_path)
+            self.env = Envwrapper(self.original_env, self.opponent, discrete_actions)
 
             for i_episode in range(self.agent.NUM_EPISODES):
                 self.agent.cur_episode = i_episode
@@ -304,7 +304,7 @@ class Training():
                     end = time.time()
                     print(f"\n** after {self.agent.NUM_EPISODES* i_training_round + i_episode} th episode in {i_training_round} th training round - {end - start:.5f} sec passed**\n")
 
-            self.save_to_population(self.agent, population_path)
+            self.save_to_population(population_path, i_training_round)
             
             
 
@@ -313,20 +313,20 @@ class Training():
         if type(self.agent) == RainbowAgent:
             self.save_q_values()
 
-    def save_to_polulation(
+    def save_to_population(
             self,
             population_path,
             i_training_round):
 
         os.makedirs(population_path, exist_ok=True)
-        self.opponent.save_dict(population_path, identifier_extension=f"_{i_training_round}")
+        self.agent.save_dict(population_path, identifier_extension=f"_{i_training_round}")
     
     def select_from_population(
             self,
             population_path):
         
         N = len(os.listdir(population_path))
-        agent_index = np.random.randint(0, N-1)
+        agent_index = np.random.randint(0, N)
         load_path = os.path.join(population_path, self.opponent.MODEL_IDENTIFIER + f"_{agent_index}") + ".pth"
         self.opponent.load_dict(load_path)
 
