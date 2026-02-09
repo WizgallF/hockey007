@@ -22,7 +22,7 @@ class Envwrapper():
         obs_agent2 = self.env.obs_agent_two()
 
         if isinstance(self.player2, RainbowAgent):
-            action_p2 = self.player2.act(env=self.env, state=obs_agent2, greedy=True)
+            action_p2 = self.player2.act(env=self.env, state=obs_agent2, greedy=True) 
         else:
             action_p2 = self.player2.act(obs_agent2)
 

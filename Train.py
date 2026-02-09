@@ -230,6 +230,7 @@ class Training():
         self.original_env = self.env
         self.opponent = opponent
         self.best_opponent = deepcopy(opponent)
+        self.population_size = 0
 
         # print hyperparameter settings to console 
         if self.verbose:
@@ -247,6 +248,7 @@ class Training():
 
         start = time.time()
         best_mv_avg_reward = float('-inf')
+        self.agent_against_basic_opp = []
 
 
         for i_training_round in range(self.agent.TRAINING_ROUNDS):
@@ -290,11 +292,13 @@ class Training():
 
 
                 # TODO: how to determine which agent to save? just save them regularly?
-                """# ------ save best performing agent ------
+                # ------ save best performing agent ------
                 n = len(self.statistics["ep_rew"]) 
                 if n > self.mavg_window_size + 1:
                     mv_avg_reward = np.mean(self.statistics["ep_rew"][-self.mavg_window_size:-1])
                     self.statistics["mv_avg_rew"].append(mv_avg_reward)
+
+                    """
                     if mv_avg_reward > best_mv_avg_reward:
                         self.agent.save_dict(self.experiment_path)
                         best_mv_avg_reward = mv_avg_reward
@@ -307,19 +311,25 @@ class Training():
                     end = time.time()
                     print(f"\n** after {self.agent.NUM_EPISODES* i_training_round + i_episode} th episode in {i_training_round} th training round - {end - start:.5f} sec passed**\n")
 
-            if True: # self.agent_against_agent_eval(self.agent, self.best_opponent) > 0.5 or True: set this condition active!!!!
+                if i_episode % 1000 == 0:
+                    agent_basic_eval = self.agent_against_basicopp_eval(self.agent)
+                    self.agent_against_basic_opp.append(agent_basic_eval)
+
+            if self.agent_against_agent_eval(self.agent, self.best_opponent) > 0.4:
                 self.best_opponent = deepcopy(self.agent)
                 self.save_to_population(population_path, i_training_round)
             
             
 
         self.save_data()
+        self.save_performance_against_basic_opp()
 
         if type(self.agent) == RainbowAgent:
             self.save_q_values()
 
         
-        self.evaluate_agents(population_path)
+        eval_results = self.evaluate_agents(population_path)
+        
 
     def evaluate_agents(
             self,
@@ -348,6 +358,7 @@ class Training():
             results.append(agent_against_i_opponent)
 
         print(results)
+        return results
 
 
         # TODO: make population path self argument
@@ -355,9 +366,9 @@ class Training():
     def agent_against_agent_eval(
             self, 
             player1, 
-            player2,
+            player2= "basicopp",
             environment = 'Hockey-One-v0',
-            num_episodes = 100):
+            num_episodes = 50):
         
         if environment == 'Hockey-One-v0':
             env = h_env.HockeyEnv()
@@ -393,6 +404,55 @@ class Training():
 
         return score["player1"]/num_episodes
     
+    def agent_against_basicopp_eval(
+            self, 
+            player1,
+            environment = 'Hockey-One-v0',
+            num_episodes = 50):
+        
+        if environment == 'Hockey-One-v0':
+            env = h_env.HockeyEnv()
+            obs, info = env.reset()
+            obs_agent2 = env.obs_agent_two()
+            score = {"player1": 0, "player2": 0}
+
+            
+            player2 = h_env.BasicOpponent()
+
+            for _ in range(num_episodes):
+                d = False
+                obs, info = env.reset()
+                while not d:
+                    
+                    if type(player1) == RainbowAgent:
+                        discrete_action = player1.act(env=env, state=obs, greedy=True) 
+                        a1 = self._discrete_to_continuous(discrete_action)
+                    else:
+                        a1 = player1.act(obs) 
+
+                    a2 = player2.act(obs_agent2)
+
+                    obs, r, d, _, info = env.step(np.hstack([a1,a2]))   
+                    obs_agent2 = env.obs_agent_two()
+                if info["winner"] == 1:
+                    score["player1"] += 1
+                else:
+                    score["player2"] += 1
+
+        env.close()
+
+        return score["player1"]/num_episodes
+    
+    def save_performance_against_basic_opp(self):
+        # ------ create performance_against_basic_opp plot ------
+        plt.figure(figsize=(8, 6), dpi=300)
+        plt.plot(np.array(self.agent_against_basic_opp ), label="Mean Q", color="blue", linewidth=1.5)
+        plt.xlabel("Episodes (1k intervall)")
+        plt.ylabel("Proportion of games won")
+        plt.title("Performance against basic opponent")
+        plt.savefig(os.path.join(self.experiment_path, f"basic_opponent-{self.agent.MODEL_IDENTIFIER}.png"), dpi=300)
+        plt.close()
+    
     def _discrete_to_continuous(self, discrete_action):
         """ discrete actions from 0 to 7
         Args:
@@ -414,14 +474,14 @@ class Training():
             i_training_round):
 
         os.makedirs(population_path, exist_ok=True)
-        self.agent.save_dict(population_path, identifier_extension=f"_{i_training_round}")
+        self.agent.save_dict(population_path, identifier_extension=f"_{self.population_size}")
+        self.population_size += 1
     
     def select_from_population(
             self,
             population_path):
         
-        N = len(os.listdir(population_path))
-        agent_index = np.random.randint(0, N)
+        agent_index = np.random.randint(0, self.population_size)
         load_path = os.path.join(population_path, self.opponent.MODEL_IDENTIFIER + f"_{agent_index}") + ".pth"
         self.opponent.load_dict(load_path)
 

@@ -109,8 +109,13 @@ class RainbowAgent(Agent):
 
                 probs  = torch.softmax(logits, dim=-1)
                 q_vals = (probs * self.support.view(1, 1, -1)).sum(-1)
-
-                if state.ndim == 1:
+                print(state.shape, "state shape")
+                print(state.ndim, "state ndim")
+                if state.shape[0] == 1:
+                    print(q_vals.shape, "qval shape")
+                    print(q_vals.argmax(dim=1).shape, "qval argmax")
+                    print(q_vals.argmax(dim=1).squeeze(), "qval squeeze")
+                    print(q_vals.argmax(dim=1).squeeze().item(), "qval squeeze item")
                     return q_vals.argmax(dim=1).squeeze().item()
                 else:
                     q_vals.argmax(dim=1).squeeze().detach().cpu().numpy()
@@ -118,14 +123,16 @@ class RainbowAgent(Agent):
             else:
                 with torch.no_grad():
                     q_values = self.policy_net(state)
-                if state.ndim == 1:
-                    return torch.argmax(q_values).detach().item()
+                
+                actions = torch.argmax(q_values, dim=1).detach().cpu().numpy()
+                if len(actions) == 1:
+                    return actions[0]
                 else:
-                    return torch.argmax(q_values, dim=1).detach().cpu().numpy()
+                    return actions
         else:
 
             # ------ random action sampling from environment ------
-            if state.ndim == 1:
+            if state.shape[0] == 1:
                 return env.action_space.sample()
             else:
                 random_actions = [env.action_space.sample() for _ in range(state.shape[0])]
