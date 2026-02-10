@@ -109,13 +109,7 @@ class RainbowAgent(Agent):
 
                 probs  = torch.softmax(logits, dim=-1)
                 q_vals = (probs * self.support.view(1, 1, -1)).sum(-1)
-                print(state.shape, "state shape")
-                print(state.ndim, "state ndim")
                 if state.shape[0] == 1:
-                    print(q_vals.shape, "qval shape")
-                    print(q_vals.argmax(dim=1).shape, "qval argmax")
-                    print(q_vals.argmax(dim=1).squeeze(), "qval squeeze")
-                    print(q_vals.argmax(dim=1).squeeze().item(), "qval squeeze item")
                     return q_vals.argmax(dim=1).squeeze().item()
                 else:
                     q_vals.argmax(dim=1).squeeze().detach().cpu().numpy()
