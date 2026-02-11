@@ -63,6 +63,9 @@ DEFAULT_GRID = {
 }
 
 
+SWEEP_META_KEYS = {"num_parallel_envs", "num_episodes"}
+
+
 def _load_grid_config(path: str) -> Dict[str, Any]:
     with open(path, "r") as f:
         if path.endswith((".yaml", ".yml")):
@@ -203,6 +206,58 @@ def score_from_stats(stats: Dict[str, List[float]], mavg_window: int) -> float:
     return float(np.mean(ep[-window:]))
 
 
+def _resolve_num_parallel_envs(cfg: Dict[str, Any], args: argparse.Namespace) -> int:
+    raw = cfg.get("num_parallel_envs", args.num_parallel_envs)
+    return max(1, int(raw))
+
+
+def _resolve_num_episodes(cfg: Dict[str, Any], args: argparse.Namespace) -> int | None:
+    raw = cfg.get("num_episodes", args.num_episodes)
+    if raw is None:
+        return None
+    return int(raw)
+
+
+def _build_env_bundle(env_name: str, num_parallel_envs: int):
+    if num_parallel_envs > 1:
+        env = gym.vector.SyncVectorEnv([lambda: make_env(env_name) for _ in range(num_parallel_envs)])
+        obs_space = env.single_observation_space
+        act_space = env.single_action_space
+    else:
+        env = make_env(env_name)
+        obs_space = env.observation_space
+        act_space = env.action_space
+    return env, obs_space, act_space
+
+
+def _run_training_once(cfg_dict: Dict[str, Any], args: argparse.Namespace):
+    run_cfg = dict(cfg_dict)
+    num_parallel_envs = _resolve_num_parallel_envs(run_cfg, args)
+    num_episodes = _resolve_num_episodes(run_cfg, args)
+    for key in SWEEP_META_KEYS:
+        run_cfg.pop(key, None)
+
+    env, obs_space, act_space = _build_env_bundle(args.env, num_parallel_envs)
+    try:
+        agent = _build_agent(act_space, obs_space, run_cfg)
+        if num_episodes is not None:
+            agent.NUM_EPISODES = int(num_episodes)
+
+        trainer = Training(
+            agent=agent,
+            env=env,
+            base_dir=args.base_dir,
+            save_intermediate_agents=False,
+            verbose=args.verbose,
+        )
+        trainer.train()
+
+        score = score_from_stats(trainer.statistics, trainer.mavg_window_size)
+        return score, trainer.experiment_path, num_parallel_envs
+    finally:
+        env.close()
+
+
 def run_trial(
     trial_idx: int,
     config: Dict[str, Any],
@@ -220,33 +275,19 @@ def run_trial(
         reinit=True,
     )
 
-    trial_seed = None
-    if "SEED" in config:
-        trial_seed = int(config["SEED"]) + trial_idx
+    cfg_dict = dict(run.config)
+    trial_seed = args.seed
+    if "SEED" in cfg_dict:
+        trial_seed = int(cfg_dict["SEED"]) + trial_idx
     set_seeds(trial_seed)
 
-    env = make_env(args.env)
     try:
-        cfg_dict = dict(run.config)
-        agent = _build_agent(env, cfg_dict)
-        if args.num_episodes is not None:
-            agent.NUM_EPISODES = int(args.num_episodes)
-
-        trainer = Training(
-            agent=agent,
-            env=env,
-            base_dir=args.base_dir,
-            save_intermediate_agents=False,
-            verbose=args.verbose,
-        )
-        trainer.train()
-
-        score = score_from_stats(trainer.statistics, trainer.mavg_window_size)
+        score, exp_path, num_parallel_envs = _run_training_once(cfg_dict, args)
         run.summary["best_mavg_rew"] = score
+        run.summary["num_parallel_envs"] = int(num_parallel_envs)
         wandb.log({"best_mavg_rew": score})
-        return score, dict(run.config), trainer.experiment_path
+        return score, cfg_dict, exp_path
     finally:
-        env.close()
         run.finish()
 
 
@@ -283,17 +324,17 @@ def write_best_yaml(
     return yaml_path
 
 
-def _build_agent(env, cfg_dict: Dict[str, Any]):
+def _build_agent(action_space, observation_space, cfg_dict: Dict[str, Any]):
     sig = inspect.signature(TDMPC2Agent.__init__)
     if "config_overrides" in sig.parameters:
         return TDMPC2Agent(
-            env.action_space,
-            env.observation_space,
+            action_space,
+            observation_space,
             config_overrides=cfg_dict,
         )
 
     # Fallback for older TDMPC2Agent versions (no config_overrides)
-    agent = TDMPC2Agent(env.action_space, env.observation_space)
+    agent = TDMPC2Agent(action_space, observation_space)
 
     # Disallow model-shape changes without full re-init
     incompatible = {"Z_DIM", "HIDDEN_DIM"}
@@ -356,29 +397,27 @@ def _apply_overrides_compat(agent: Any, cfg_dict: Dict[str, Any]) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="TD-MPC2 WandB grid tuning")
+    parser = argparse.ArgumentParser(description="TD-MPC2 WandB tuning")
     parser.add_argument("--env", type=str, default="Hockey-One-v0")
     parser.add_argument("--base_dir", type=str, default="experiments")
     parser.add_argument("--grid_config", type=str, default=None, help="Path to YAML/JSON grid config")
     parser.add_argument("--wandb_project", type=str, default="tdmpc2-tune")
     parser.add_argument("--wandb_entity", type=str, default=None)
     parser.add_argument("--wandb_mode", type=str, default=None, help="online|offline|disabled")
+    parser.add_argument("--num_parallel_envs", type=int, default=1)
     parser.add_argument("--num_episodes", type=int, default=None)
     parser.add_argument("--max_runs", type=int, default=None)
+    parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument(
+        "--sweep",
+        action="store_true",
+        help="Single-run mode for W&B sweeps (uses wandb.config as hyperparameters).",
+    )
     parser.add_argument("--verbose", action="store_true")
     return parser.parse_args()
 
 
-def main() -> int:
-    args = parse_args()
-
-    # Ensure relative paths (like configs/tdmpc_config.yaml) resolve from repo root
-    repo_root = Path(__file__).resolve().parent
-    os.chdir(repo_root)
-
-    if args.wandb_mode is None:
-        args.wandb_mode = os.environ.get("WANDB_MODE", None)
-
+def run_grid_tuning(args: argparse.Namespace) -> int:
     grid_spec = DEFAULT_GRID if args.grid_config is None else _load_grid_config(args.grid_config)
     grid = build_grid(grid_spec)
 
@@ -410,6 +449,50 @@ def main() -> int:
         best_yaml_path = write_best_yaml(args.base_dir, best_score, best_config, best_experiment_path)
     print(f"Best config saved to: {best_yaml_path}")
     return 0
+
+
+def run_sweep_once(args: argparse.Namespace) -> int:
+    if wandb is None:
+        raise RuntimeError("wandb is not installed. Install it or remove wandb usage.")
+
+    run = wandb.init(
+        project=args.wandb_project,
+        entity=args.wandb_entity,
+        config={},
+        mode=args.wandb_mode,
+        reinit=True,
+    )
+
+    cfg_dict = dict(run.config)
+    run_seed = args.seed
+    if "SEED" in cfg_dict:
+        run_seed = int(cfg_dict["SEED"])
+    set_seeds(run_seed)
+
+    try:
+        score, exp_path, num_parallel_envs = _run_training_once(cfg_dict, args)
+        run.summary["best_mavg_rew"] = score
+        run.summary["experiment_path"] = exp_path
+        run.summary["num_parallel_envs"] = int(num_parallel_envs)
+        wandb.log({"best_mavg_rew": score})
+    finally:
+        run.finish()
+    return 0
+
+
+def main() -> int:
+    args = parse_args()
+
+    # Ensure relative paths (like configs/tdmpc_config.yaml) resolve from repo root
+    repo_root = Path(__file__).resolve().parent
+    os.chdir(repo_root)
+
+    if args.wandb_mode is None:
+        args.wandb_mode = os.environ.get("WANDB_MODE", None)
+
+    if args.sweep:
+        return run_sweep_once(args)
+    return run_grid_tuning(args)
 
 
 if __name__ == "__main__":

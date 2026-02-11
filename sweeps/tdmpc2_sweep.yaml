@@ -1,0 +1,57 @@
+program: TDMPC2_tune.py
+method: bayes
+metric:
+  name: best_mavg_rew
+  goal: maximize
+parameters:
+  LR:
+    distribution: log_uniform_values
+    min: 1.0e-05
+    max: 5.0e-04
+  BATCH_SIZE:
+    values: [128, 256, 512]
+  TRAIN_HORIZON:
+    values: [8, 12, 16]
+  MPC_SAMPLES:
+    values: [256, 512]
+  MPC_ITERS:
+    values: [2, 3, 4]
+  MPC_SIGMA:
+    distribution: uniform
+    min: 0.2
+    max: 0.6
+  MPC_TEMP:
+    distribution: uniform
+    min: 0.5
+    max: 2.0
+  EXPL_NOISE:
+    distribution: uniform
+    min: 0.05
+    max: 0.2
+  TAU:
+    distribution: uniform
+    min: 0.005
+    max: 0.05
+  GAMMA:
+    distribution: uniform
+    min: 0.95
+    max: 0.999
+  num_parallel_envs:
+    values: [1, 4, 8, 16]
+run_cap: 200
+command:
+  - ${env}
+  - timeout
+  - --signal=SIGINT
+  - --kill-after=30s
+  - 7200
+  - python3
+  - ${program}
+  - --sweep
+  - --env
+  - Hockey-One-v0
+  - --base_dir
+  - experiments
+  - --num_episodes
+  - "1000000"
+  - --verbose

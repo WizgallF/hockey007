@@ -111,9 +111,11 @@ class Training():
                     print(f"\n** after {i_episode} th episode - {end - start:.5f} sec passed**\n")
         else:
             num_envs = int(self.env.num_envs)
-            assert type(self.agent).__name__ == "DDPGAgent", (
-                "Parallel training is only supported for DDPGAgent."
+            agent_type = type(self.agent).__name__
+            assert agent_type in {"DDPGAgent", "TDMPC2Agent"}, (
+                "Parallel training is only supported for DDPGAgent and TDMPC2Agent."
             )
+            is_ddpg_vectorized = agent_type == "DDPGAgent"
             ep_rew_per_env = np.zeros(num_envs, dtype=np.float32)
             state, info = self.env.reset()
             episodes_finished = 0
@@ -122,12 +124,31 @@ class Training():
                 self.agent.cur_episode = episodes_finished
 
                 # ------ act ------
-                action = self.agent.act(self.env, state, episodes_finished, self.statistics)
+                if is_ddpg_vectorized:
+                    action = self.agent.act(self.env, state, episodes_finished, self.statistics)
+                else:
+                    action = np.asarray(
+                        [
+                            self.agent.act(self.env, state[env_idx], episodes_finished, self.statistics)
+                            for env_idx in range(num_envs)
+                        ]
+                    )
 
                 next_state, reward, terminated, truncated, _ = self.env.step(action)
+                done = np.logical_or(terminated, truncated)
 
                 # ------ observe ------
-                self.agent.observe(state, action, reward, next_state, terminated)
+                if is_ddpg_vectorized:
+                    self.agent.observe(state, action, reward, next_state, terminated)
+                else:
+                    for env_idx in range(num_envs):
+                        self.agent.observe(
+                            state[env_idx],
+                            action[env_idx],
+                            float(reward[env_idx]),
+                            next_state[env_idx],
+                            bool(done[env_idx]),
+                        )
                 ep_rew_per_env += reward.astype(np.float32)
 
                 # ------ move to next state ------
@@ -138,7 +159,6 @@ class Training():
                     self.agent.update(self.statistics)
 
                 # ------ terminate episodes ------
-                done = np.logical_or(terminated, truncated)
                 if np.any(done):
                     done_indices = np.where(done)[0]
                     for env_idx in done_indices:
