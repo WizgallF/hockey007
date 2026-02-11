@@ -1,0 +1,109 @@
+program: DDPG_tune.py
+method: bayes
+metric:
+  name: best_mavg_rew
+  goal: maximize
+parameters:
+  model_identifier:
+    values:
+    - ddpg
+  start_training:
+    values:
+    - 0
+    - 500
+    - 1000
+    - 5000
+  eps:
+    distribution: uniform
+    min: 0.075
+    max: 0.2
+  learning_rate_actor:
+    distribution: log_uniform_values
+    min: 1.0000000000000002e-06
+    max: 0.0001
+  learning_rate_critic:
+    distribution: log_uniform_values
+    min: 4.0e-05
+    max: 0.001
+  batch_size:
+    values:
+    - 128
+    - 512
+    - 1000
+    - 2000
+    - 4000
+    - 8000
+  tau:
+    distribution: uniform
+    min: 0.0005
+    max: 0.005
+  update_target_every:
+    values:
+    - 5
+    - 10
+    - 16
+    - 20
+  twin_delayed:
+    values:
+    - true
+  policy_noise:
+    distribution: log_uniform_values
+    min: 0.01
+    max: 0.25
+  discount:
+    distribution: uniform
+    min: 0.85
+    max: 0.999
+  train_iterations:
+    values:
+    - 1
+    - 4
+    - 8
+    - 16
+  policy_delay:
+    values:
+    - 1
+    - 2
+    - 3
+  action_noise_theta:
+    distribution: log_uniform_values
+    min: 0.02
+    max: 0.5
+  action_noise_dt:
+    distribution: log_uniform_values
+    min: 0.001
+    max: 0.025
+  noise_clip:
+    distribution: log_uniform_values
+    min: 0.02
+    max: 0.5
+  use_distributional:
+    values:
+    - true
+  num_quantiles:
+    values:
+    - 10
+    - 25
+    - 50
+    - 100
+  tqc_top_k:
+    values:
+    - 1
+    - 5
+    - 10
+  num_parallel_envs:
+    values: [1, 5, 20, 50, 100, 200, 500]
+run_cap: 500
+command:
+- ${env}
+- timeout
+- --signal=SIGINT
+- --kill-after=30s
+- 7200
+- python3
+- ${program}
+- --env
+- Hockey-One-v0
+- --base_dir
+- experiments
+- --verbose
