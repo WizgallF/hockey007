@@ -34,6 +34,10 @@ try:
     import yaml
 except Exception:
     yaml = None
+try:
+    import fcntl
+except Exception:
+    fcntl = None
 
 import gymnasium as gym
 from gymnasium import spaces
@@ -218,6 +222,13 @@ def _resolve_num_episodes(cfg: Dict[str, Any], args: argparse.Namespace) -> int 
     return int(raw)
 
 
+def _metric_value_or_floor(score: float, floor: float = -1e12) -> float:
+    val = float(score)
+    if np.isfinite(val):
+        return val
+    return float(floor)
+
+
 def _build_env_bundle(env_name: str, num_parallel_envs: int):
     if num_parallel_envs > 1:
         env = gym.vector.SyncVectorEnv([lambda: make_env(env_name) for _ in range(num_parallel_envs)])
@@ -230,7 +241,11 @@ def _build_env_bundle(env_name: str, num_parallel_envs: int):
     return env, obs_space, act_space
 
 
-def _run_training_once(cfg_dict: Dict[str, Any], args: argparse.Namespace):
+def _run_training_once(
+    cfg_dict: Dict[str, Any],
+    args: argparse.Namespace,
+    allow_partial_on_interrupt: bool = False,
+):
     run_cfg = dict(cfg_dict)
     num_parallel_envs = _resolve_num_parallel_envs(run_cfg, args)
     num_episodes = _resolve_num_episodes(run_cfg, args)
@@ -250,10 +265,16 @@ def _run_training_once(cfg_dict: Dict[str, Any], args: argparse.Namespace):
             save_intermediate_agents=False,
             verbose=args.verbose,
         )
-        trainer.train()
+        interrupted = False
+        try:
+            trainer.train()
+        except KeyboardInterrupt:
+            if not allow_partial_on_interrupt:
+                raise
+            interrupted = True
 
         score = score_from_stats(trainer.statistics, trainer.mavg_window_size)
-        return score, trainer.experiment_path, num_parallel_envs
+        return score, trainer.experiment_path, num_parallel_envs, interrupted
     finally:
         env.close()
 
@@ -282,7 +303,7 @@ def run_trial(
     set_seeds(trial_seed)
 
     try:
-        score, exp_path, num_parallel_envs = _run_training_once(cfg_dict, args)
+        score, exp_path, num_parallel_envs, _ = _run_training_once(cfg_dict, args)
         run.summary["best_mavg_rew"] = score
         run.summary["num_parallel_envs"] = int(num_parallel_envs)
         wandb.log({"best_mavg_rew": score})
@@ -315,13 +336,56 @@ def write_best_yaml(
         for k, v in payload["params"].items():
             lines.append(f"  {k}: {v}")
         content = "\n".join(lines) + "\n"
-        with open(yaml_path, "w") as f:
+        tmp_path = f"{yaml_path}.tmp"
+        with open(tmp_path, "w") as f:
             f.write(content)
     else:
-        with open(yaml_path, "w") as f:
+        tmp_path = f"{yaml_path}.tmp"
+        with open(tmp_path, "w") as f:
             yaml.safe_dump(payload, f, sort_keys=False)
+    os.replace(tmp_path, yaml_path)
 
     return yaml_path
+
+
+def _read_existing_best_score(base_dir: str) -> float:
+    yaml_path = os.path.join(base_dir, "td_best_params.yaml")
+    if not os.path.exists(yaml_path):
+        return float("-inf")
+    try:
+        with open(yaml_path, "r") as f:
+            if yaml is None:
+                for line in f:
+                    if line.strip().startswith("best_mavg_rew:"):
+                        _, value = line.split(":", 1)
+                        return float(value.strip())
+                return float("-inf")
+            data = yaml.safe_load(f) or {}
+            return float(data.get("best_mavg_rew", float("-inf")))
+    except Exception:
+        return float("-inf")
+
+
+def maybe_update_best_yaml(
+    base_dir: str,
+    score: float,
+    config: Dict[str, Any],
+    experiment_path: str,
+) -> tuple[bool, str | None]:
+    os.makedirs(base_dir, exist_ok=True)
+    lock_path = os.path.join(base_dir, "td_best_params.yaml.lock")
+    with open(lock_path, "w") as lock_file:
+        if fcntl is not None:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            prev_best = _read_existing_best_score(base_dir)
+            if score <= prev_best:
+                return False, None
+            yaml_path = write_best_yaml(base_dir, score, config, experiment_path)
+            return True, yaml_path
+        finally:
+            if fcntl is not None:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def _build_agent(action_space, observation_space, cfg_dict: Dict[str, Any]):
@@ -469,13 +533,37 @@ def run_sweep_once(args: argparse.Namespace) -> int:
         run_seed = int(cfg_dict["SEED"])
     set_seeds(run_seed)
 
+    score = float("-inf")
+    exp_path = ""
+    num_parallel_envs = _resolve_num_parallel_envs(cfg_dict, args)
+    interrupted = False
+    updated_best = False
+    best_yaml_path = None
+
     try:
-        score, exp_path, num_parallel_envs = _run_training_once(cfg_dict, args)
-        run.summary["best_mavg_rew"] = score
+        score, exp_path, num_parallel_envs, interrupted = _run_training_once(
+            cfg_dict, args, allow_partial_on_interrupt=True
+        )
+        updated_best, best_yaml_path = maybe_update_best_yaml(args.base_dir, score, cfg_dict, exp_path)
+    except Exception as e:
+        run.summary["run_error"] = str(e)
+        run.summary["run_failed"] = True
+        raise
+    finally:
+        score_to_log = _metric_value_or_floor(score)
+        run.summary["best_mavg_rew"] = score_to_log
         run.summary["experiment_path"] = exp_path
         run.summary["num_parallel_envs"] = int(num_parallel_envs)
-        wandb.log({"best_mavg_rew": score})
-    finally:
+        run.summary["interrupted"] = bool(interrupted)
+        run.summary["best_yaml_updated"] = bool(updated_best)
+        if best_yaml_path is not None:
+            run.summary["best_yaml_path"] = best_yaml_path
+        wandb.log(
+            {
+                "best_mavg_rew": score_to_log,
+                "interrupted": int(interrupted),
+            }
+        )
         run.finish()
     return 0
 

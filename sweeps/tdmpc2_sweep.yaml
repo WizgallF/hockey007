@@ -41,10 +41,6 @@ parameters:
 run_cap: 200
 command:
   - ${env}
-  - timeout
-  - --signal=SIGINT
-  - --kill-after=30s
-  - 7200
   - python3
   - ${program}
   - --sweep
@@ -53,5 +49,5 @@ command:
   - --base_dir
   - experiments
   - --num_episodes
-  - "1000000"
+  - "2000"
   - --verbose
