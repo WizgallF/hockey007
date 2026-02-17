@@ -11,6 +11,7 @@ from itertools import count
 from Wrapper import Envwrapper
 import hockey.hockey_env as h_env
 from copy import deepcopy
+import random
 
 
 class Training():
@@ -58,6 +59,7 @@ class Training():
         best_mv_avg_reward = float('-inf')
 
         is_vector_env = hasattr(self.env, "num_envs")
+        print(is_vector_env)
         if not is_vector_env:
             for i_episode in range(self.agent.NUM_EPISODES):
                 self.agent.cur_episode = i_episode
@@ -112,7 +114,7 @@ class Training():
         else:
             num_envs = int(self.env.num_envs)
             agent_type = type(self.agent).__name__
-            assert agent_type in {"DDPGAgent", "TDMPC2Agent"}, (
+            assert agent_type in {"DDPGAgent", "TDMPC2Agent", "RainbowAgent"}, (
                 "Parallel training is only supported for DDPGAgent and TDMPC2Agent."
             )
             is_ddpg_vectorized = agent_type == "DDPGAgent"
@@ -243,12 +245,13 @@ class Training():
     def train_self_play(
             self, 
             opponent,
-            discrete_actions = False):
+            discrete_actions = False,
+            agent_load_path = None):
 
         torch.set_default_dtype(torch.float32)
 
         self.original_env = self.env
-        self.opponent = opponent
+        self.opponent = deepcopy(opponent)
         self.best_opponent = deepcopy(opponent)
         self.population_size = 0
 
@@ -258,7 +261,6 @@ class Training():
 
         # Create experiment folder and save config
         self.experiment_path = self.agent.save_experiment_config(self.base_dir)
-
 
 
         # Add random agent to population for self play
@@ -274,7 +276,14 @@ class Training():
         for i_training_round in range(self.agent.TRAINING_ROUNDS):
 
             # Wrap environment with Player 2
-            self.select_from_population(population_path)
+
+            # Train first two rounds against strong opponent
+            if i_training_round < 2:
+                self.opponent = h_env.BasicOpponent(weak=False)
+                self.env = Envwrapper(self.original_env, self.opponent, discrete_actions)
+            else:
+                self.select_from_population(population_path)
+
             self.env = Envwrapper(self.original_env, self.opponent, discrete_actions)
 
             for i_episode in range(self.agent.NUM_EPISODES):
@@ -318,13 +327,7 @@ class Training():
                     mv_avg_reward = np.mean(self.statistics["ep_rew"][-self.mavg_window_size:-1])
                     self.statistics["mv_avg_rew"].append(mv_avg_reward)
 
-                    """
-                    if mv_avg_reward > best_mv_avg_reward:
-                        self.agent.save_dict(self.experiment_path)
-                        best_mv_avg_reward = mv_avg_reward
-                        if self.verbose:
-                            print(f"Saved model with moving average reward: {mv_avg_reward}")"""
-
+                    
 
                 # ------ print to console -----
                 if self.verbose and i_episode % 5 == 0:
@@ -335,7 +338,7 @@ class Training():
                     agent_basic_eval = self.agent_against_basicopp_eval(self.agent)
                     self.agent_against_basic_opp.append(agent_basic_eval)
 
-            if self.agent_against_agent_eval(self.agent, self.best_opponent) > 0.4:
+            if self.agent_against_agent_eval(self.agent, self.best_opponent) > 0.5:
                 self.best_opponent = deepcopy(self.agent)
                 self.save_to_population(population_path, i_training_round)
             
@@ -504,6 +507,20 @@ class Training():
         agent_index = np.random.randint(0, self.population_size)
         load_path = os.path.join(population_path, self.opponent.MODEL_IDENTIFIER + f"_{agent_index}") + ".pth"
         self.opponent.load_dict(load_path)
+
+        p = random.random()
+        if p < 0.2:
+            self.opponent = h_env.BasicOpponent(weak=False)
+        elif p < 0.5:
+            
+            recent_idx = max(0, self.population_size - 3)
+            agent_index = np.random.randint(recent_idx, self.population_size)
+            load_path = os.path.join(population_path, self.opponent.MODEL_IDENTIFIER + f"_{agent_index}") + ".pth"
+            self.opponent.load_dict(load_path)
+        else:
+            agent_index = np.random.randint(0, self.population_size)
+            load_path = os.path.join(population_path, self.opponent.MODEL_IDENTIFIER + f"_{agent_index}") + ".pth"
+            self.opponent.load_dict(load_path)
 
 
 

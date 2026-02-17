@@ -23,13 +23,17 @@ class Envwrapper():
 
         if isinstance(self.player2, RainbowAgent):
             action_p2 = self.player2.act(env=self.env, state=obs_agent2, greedy=True) 
+            if self.discrete_actions:
+                return self.env.step(np.hstack([self._convert_action(action_p1), self._convert_action(action_p2)]))
+            else:
+                return self.env.step(np.hstack([action_p1, self._convert_action(action_p2)]))
         else:
             action_p2 = self.player2.act(obs_agent2)
 
-        if self.discrete_actions:
-            return self.env.step(np.hstack([self._convert_action(action_p1), self._convert_action(action_p2)]))
-        else:
-            return self.env.step(np.hstack([action_p1, action_p2]))
+            if self.discrete_actions:
+                return self.env.step(np.hstack([self._convert_action(action_p1), action_p2]))
+            else:
+                return self.env.step(np.hstack([action_p1, action_p2]))
 
 
     def _resolve_player(self, player):
@@ -43,7 +47,8 @@ class Envwrapper():
                 return h_env.BasicOpponent(weak=True)
         if isinstance(player, RainbowAgent):
             return player
-        
+        if isinstance(player, h_env.BasicOpponent):
+            return player
     def _convert_action(self, discrete_action):
         action_cont = [(discrete_action == 1) * -1.0 + (discrete_action == 2) * 1.0,  # player x
                    (discrete_action == 3) * -1.0 + (discrete_action == 4) * 1.0,  # player y

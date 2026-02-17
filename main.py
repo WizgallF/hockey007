@@ -20,7 +20,7 @@ def main ():
     parser.add_argument ( '--num_parallel_envs', type=int, default=1, help = "Number of parallel environments to use during training")
 
     parser.add_argument ( '--playagent_1_type', type=str, default="rainbow", help = "Specify the agent 1 to use for evaluation")
-    parser.add_argument ( '--playagent1_path', type=str, default="/home/nils-klute/Documents/machine_learning/Reinforcement Learning/hockey007/saved_agents/rainbow.pth", help = "Path to the trained agent 1 for evaluation")
+    parser.add_argument ( '--playagent1_path', type=str, default="/home/stud217/hockey007/experiments/history/2026-02-02_11-59-12_rainbow noise sigma0=0.5/rainbow.pth", help = "Path to the trained agent 1 for evaluation")
     parser.add_argument ( '--playagent1_config', type=str, default=None, help = "Path to the config file for agent 1 (only for evaluation)")
 
     parser.add_argument ( '--playagent_2_type', type=str, default="rainbow", help = "Specify the agent 2 to use for evaluation")
@@ -42,11 +42,11 @@ def main ():
             args.base_dir, 
             args.int_agents, 
             args.verbose,
-            args.num_parallel_envs
+            num_parallel_envs = args.num_parallel_envs
             )
 
     elif args.train_self_play:
-        core.train_agent_self_play(args.agent, args.env, args.base_dir, args.int_agents, args.verbose)
+        core.train_agent_self_play(args.agent, args.env, args.base_dir, args.int_agents, args.verbose, args.playagent1_path)
 
     elif args.play:        
         core.play(
