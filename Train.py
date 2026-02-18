@@ -252,12 +252,14 @@ class Training():
         torch.set_default_dtype(torch.float32)
 
         self.original_env = self.env
-        self.opponent = deepcopy(opponent)
-        self.best_opponent = deepcopy(opponent)
+        self.opponent = self._copy_agent_without_replay_buffer()
+        self.best_opponent = self._copy_agent_without_replay_buffer()
         self.population_size = 0
         self.MODEL_IDENTIFIER = self.agent.MODEL_IDENTIFIER
-        self.fixed_opponents = self.agent.FIXED_OPPONENTS
+        self.fixed_opponents = getattr(self.agent, "FIXED_OPPONENTS", False)
         self.fixed_opponents_path = population_path
+        training_rounds = int(getattr(self.agent, "TRAINING_ROUNDS", 1))
+        k_against_strong = int(getattr(self.agent, "K_AGAINST_STRONG", 0))
 
         # print hyperparameter settings to console 
         if self.verbose:
@@ -276,76 +278,76 @@ class Training():
         start = time.time()
         best_mv_avg_reward = float('-inf')
         self.agent_against_basic_opp = []
+        self.last_selected_opponent_info = "none"
+
+        if self.verbose:
+            print(
+                f"[SelfPlay] start | rounds={training_rounds} | episodes_per_round={self.agent.NUM_EPISODES} "
+                f"| fixed_opponents={self.fixed_opponents} | warmup_strong_rounds={k_against_strong}"
+            )
 
 
-        for i_training_round in range(self.agent.TRAINING_ROUNDS):
+        for i_training_round in range(training_rounds):
+            if self.verbose:
+                print(
+                    f"\n[SelfPlay][Round {i_training_round + 1}/{training_rounds}] "
+                    f"population_size={self.population_size}"
+                )
 
             # Wrap environment with Player 2
 
             # Train first two rounds against strong opponent
-            if not self.fixed_opponents and i_training_round < self.agent.K_AGAINST_STRONG:
+            if not self.fixed_opponents and i_training_round < k_against_strong:
                 self.opponent = h_env.BasicOpponent(weak=False)
                 self.env = Envwrapper(self.original_env, self.opponent, discrete_actions)
+                if self.verbose:
+                    print(f"[SelfPlay][Round {i_training_round + 1}] mode=warmup_strong_opponent")
+                self._run_self_play_single_round(i_training_round, start)
             else:
-                self.select_from_population(population_path)
+                use_parallel_population = (not self.fixed_opponents and self.population_size > 1)
+                if use_parallel_population:
+                    opponents = self._load_population_opponents(population_path)
+                    if len(opponents) > 1:
+                        if self.verbose:
+                            print(
+                                f"[SelfPlay][Round {i_training_round + 1}] "
+                                f"mode=parallel_pool | active_opponents={len(opponents)}"
+                            )
+                        self._run_self_play_parallel_round(opponents, discrete_actions, i_training_round, start)
+                    else:
+                        self.select_from_population(population_path)
+                        self.env = Envwrapper(self.original_env, self.opponent, discrete_actions)
+                        if self.verbose:
+                            print(
+                                f"[SelfPlay][Round {i_training_round + 1}] mode=single_opponent "
+                                f"| selected={self.last_selected_opponent_info}"
+                            )
+                        self._run_self_play_single_round(i_training_round, start)
+                else:
+                    self.select_from_population(population_path)
+                    self.env = Envwrapper(self.original_env, self.opponent, discrete_actions)
+                    if self.verbose:
+                        print(
+                            f"[SelfPlay][Round {i_training_round + 1}] mode=single_opponent "
+                            f"| selected={self.last_selected_opponent_info}"
+                        )
+                    self._run_self_play_single_round(i_training_round, start)
 
-            self.env = Envwrapper(self.original_env, self.opponent, discrete_actions)
+            winrate_vs_best = self.agent_against_agent_eval(self.agent, self.best_opponent)
+            if self.verbose:
+                print(
+                    f"[SelfPlay][Round {i_training_round + 1}] end "
+                    f"| winrate_vs_best={winrate_vs_best:.3f} | {self._latest_self_play_stats()}"
+                )
 
-            for i_episode in range(self.agent.NUM_EPISODES):
-                self.agent.cur_episode = i_episode
-
-                # --------- init environment -----------
-                state, info = self.env.reset()
-                
-                for t in count():
-
-                    # ------ act ------
-                    action = self.agent.act(self.env, state, i_episode, self.statistics)
-                    next_state, reward, terminated, truncated, _ = self.env.step(action)
-
-
-                    # ------ observe ------
-                    self.agent.observe(state, action, reward, next_state, terminated)
-                    self.statistics["ep_rew"][-1] += float(reward) 
-                    
-
-                    # ------ move to next state ------
-                    state = next_state
-
-
-                    # ------ update ------
-                    if i_episode >= self.agent.START_TRAINING:
-                        self.agent.update(self.statistics)
-
-                    # ------ terminate episode ------
-                    done = terminated or truncated
-                    if done:
-                        self.statistics["ep_rew"].append(0)
-                        break
-                
-
-
-                # TODO: how to determine which agent to save? just save them regularly?
-                # ------ save best performing agent ------
-                n = len(self.statistics["ep_rew"]) 
-                if n > self.mavg_window_size + 1:
-                    mv_avg_reward = np.mean(self.statistics["ep_rew"][-self.mavg_window_size:-1])
-                    self.statistics["mv_avg_rew"].append(mv_avg_reward)
-
-                    
-
-                # ------ print to console -----
-                if self.verbose and i_episode % 5 == 0:
-                    end = time.time()
-                    print(f"\n** after {self.agent.NUM_EPISODES* i_training_round + i_episode} th episode in {i_training_round} th training round - {end - start:.5f} sec passed**\n")
-
-                if i_episode % 1000 == 0:
-                    agent_basic_eval = self.agent_against_basicopp_eval(self.agent)
-                    self.agent_against_basic_opp.append(agent_basic_eval)
-
-            if self.agent_against_agent_eval(self.agent, self.best_opponent) > 0.5:
-                self.best_opponent = deepcopy(self.agent)
+            if winrate_vs_best > 0.5:
+                self.best_opponent = self._copy_agent_without_replay_buffer()
                 self.save_to_population(population_path, i_training_round)
+                if self.verbose:
+                    print(
+                        f"[SelfPlay][Round {i_training_round + 1}] "
+                        f"new_best_saved | population_size={self.population_size}"
+                    )
             
             
 
@@ -358,6 +360,196 @@ class Training():
         
         eval_results = self.evaluate_agents(population_path)
         
+    def _run_self_play_single_round(
+            self,
+            i_training_round,
+            start):
+        
+        for i_episode in range(self.agent.NUM_EPISODES):
+            self.agent.cur_episode = i_episode
+
+            # --------- init environment -----------
+            state, info = self.env.reset()
+            
+            for t in count():
+
+                # ------ act ------
+                action = self.agent.act(self.env, state, i_episode, self.statistics)
+                next_state, reward, terminated, truncated, _ = self.env.step(action)
+
+
+                # ------ observe ------
+                self.agent.observe(state, action, reward, next_state, terminated)
+                self.statistics["ep_rew"][-1] += float(reward) 
+                
+
+                # ------ move to next state ------
+                state = next_state
+
+
+                # ------ update ------
+                if i_episode >= self.agent.START_TRAINING:
+                    self.agent.update(self.statistics)
+
+                # ------ terminate episode ------
+                done = terminated or truncated
+                if done:
+                    self.statistics["ep_rew"].append(0)
+                    break
+            
+
+
+            # TODO: how to determine which agent to save? just save them regularly?
+            # ------ save best performing agent ------
+            n = len(self.statistics["ep_rew"]) 
+            if n > self.mavg_window_size + 1:
+                mv_avg_reward = np.mean(self.statistics["ep_rew"][-self.mavg_window_size:-1])
+                self.statistics["mv_avg_rew"].append(mv_avg_reward)
+
+                
+
+            # ------ print to console -----
+            if self.verbose and (i_episode == 0 or (i_episode + 1) % 100 == 0):
+                end = time.time()
+                print(
+                    f"[SelfPlay][Round {i_training_round + 1}] "
+                    f"episode={i_episode + 1}/{self.agent.NUM_EPISODES} "
+                    f"| elapsed={end - start:.1f}s | {self._latest_self_play_stats()}"
+                )
+
+            if i_episode % 1000 == 0:
+                agent_basic_eval = self.agent_against_basicopp_eval(self.agent)
+                self.agent_against_basic_opp.append(agent_basic_eval)
+                if self.verbose:
+                    print(
+                        f"[SelfPlay][Round {i_training_round + 1}] "
+                        f"basicopp_eval@episode={i_episode} | winrate={agent_basic_eval:.3f}"
+                    )
+    
+    def _load_population_opponents(
+            self,
+            population_path):
+        
+        opponents = []
+        for agent_index in range(self.population_size):
+            load_path = os.path.join(population_path, self.MODEL_IDENTIFIER + f"_{agent_index}") + ".pth"
+            if os.path.isfile(load_path):
+                pool_agent = self._copy_agent_without_replay_buffer()
+                pool_agent.load_dict(load_path)
+                opponents.append(pool_agent)
+        
+        return opponents
+    
+    def _copy_agent_without_replay_buffer(self):
+        detached_attrs = {}
+        for attr in ("replay_buffer", "buffer", "action_noise"):
+            if hasattr(self.agent, attr):
+                detached_attrs[attr] = getattr(self.agent, attr)
+                setattr(self.agent, attr, None)
+        try:
+            copied_agent = deepcopy(self.agent)
+        finally:
+            for attr, value in detached_attrs.items():
+                setattr(self.agent, attr, value)
+
+        for attr in ("replay_buffer", "buffer", "action_noise"):
+            if hasattr(copied_agent, attr):
+                setattr(copied_agent, attr, None)
+        return copied_agent
+    
+    def _run_self_play_parallel_round(
+            self,
+            opponents,
+            discrete_actions,
+            i_training_round,
+            start):
+        
+        envs = [Envwrapper(h_env.HockeyEnv(), player2=opponent, discrete_actions=discrete_actions) for opponent in opponents]
+        num_envs = len(envs)
+        ep_rew_per_env = np.zeros(num_envs, dtype=np.float32)
+        state = np.asarray([env.reset()[0] for env in envs])
+        episodes_finished = 0
+        next_basic_eval_episode = 1
+        last_logged_episode = -1
+
+        try:
+            while episodes_finished < self.agent.NUM_EPISODES:
+                self.agent.cur_episode = episodes_finished
+                action = np.asarray(
+                    [
+                        self.agent.act(envs[env_idx], state[env_idx], episodes_finished, self.statistics)
+                        for env_idx in range(num_envs)
+                    ]
+                )
+
+                next_state = []
+                reward = np.zeros(num_envs, dtype=np.float32)
+                done = np.zeros(num_envs, dtype=bool)
+
+                for env_idx, env in enumerate(envs):
+                    obs, rew, terminated, truncated, _ = env.step(action[env_idx])
+                    next_state.append(obs)
+                    reward[env_idx] = float(rew)
+                    done[env_idx] = bool(terminated or truncated)
+                    self.agent.observe(
+                        state[env_idx],
+                        action[env_idx],
+                        float(rew),
+                        obs,
+                        bool(terminated),
+                    )
+
+                state = np.asarray(next_state)
+                ep_rew_per_env += reward
+
+                if episodes_finished >= self.agent.START_TRAINING:
+                    self.agent.update(self.statistics)
+
+                if np.any(done):
+                    done_indices = np.where(done)[0]
+                    for env_idx in done_indices:
+                        self.statistics["ep_rew"].append(float(ep_rew_per_env[env_idx]))
+                        ep_rew_per_env[env_idx] = 0.0
+                        reset_state, _ = envs[env_idx].reset()
+                        state[env_idx] = reset_state
+
+                prev_episodes_finished = episodes_finished
+                episodes_finished = len(self.statistics["ep_rew"]) - 1
+                if episodes_finished == prev_episodes_finished:
+                    continue
+
+                if len(self.statistics["ep_rew"]) > self.mavg_window_size + 1:
+                    mv_avg_reward = np.mean(self.statistics["ep_rew"][-self.mavg_window_size:-1])
+                    self.statistics["mv_avg_rew"].append(mv_avg_reward)
+
+                while episodes_finished >= next_basic_eval_episode:
+                    eval_episode = next_basic_eval_episode
+                    agent_basic_eval = self.agent_against_basicopp_eval(self.agent)
+                    self.agent_against_basic_opp.append(agent_basic_eval)
+                    if self.verbose:
+                        print(
+                            f"[SelfPlay][Round {i_training_round + 1}] "
+                            f"basicopp_eval@episode={eval_episode} | winrate={agent_basic_eval:.3f}"
+                        )
+                    next_basic_eval_episode += 1000
+
+                if (
+                    self.verbose
+                    and episodes_finished % 100 == 0
+                    and episodes_finished != last_logged_episode
+                ):
+                    end = time.time()
+                    print(
+                        f"[SelfPlay][Round {i_training_round + 1}] "
+                        f"episode={episodes_finished}/{self.agent.NUM_EPISODES} "
+                        f"| parallel_envs={num_envs} | elapsed={end - start:.1f}s "
+                        f"| {self._latest_self_play_stats()}"
+                    )
+                    last_logged_episode = episodes_finished
+        finally:
+            for env in envs:
+                env.env.close()
+
 
     def evaluate_agents(
             self,
@@ -373,8 +565,8 @@ class Training():
             agent_against_i_opponent = []
 
             for j in range(i+1, N):
-                agent_load_path = os.path.join(population_path, self.opponent.MODEL_IDENTIFIER + f"_{j}") + ".pth"
-                opponent_load_path = os.path.join(population_path, self.opponent.MODEL_IDENTIFIER + f"_{i}") + ".pth"
+                agent_load_path = os.path.join(population_path, self.MODEL_IDENTIFIER + f"_{j}") + ".pth"
+                opponent_load_path = os.path.join(population_path, self.MODEL_IDENTIFIER + f"_{i}") + ".pth"
 
                 self.agent.load_dict(agent_load_path)
                 self.opponent.load_dict(opponent_load_path)
@@ -408,18 +600,8 @@ class Training():
                 d = False
                 obs, info = env.reset()
                 while not d:
-                    
-                    if type(player1) == RainbowAgent:
-                        discrete_action = player1.act(env=env, state=obs, greedy=True) 
-                        a1 = self._discrete_to_continuous(discrete_action)
-                    else:
-                        a1 = player1.act(obs) 
-
-                    if type(player2) == RainbowAgent:
-                        discrete_action = player2.act(env=env, state=obs_agent2, greedy=True) 
-                        a2 = self._discrete_to_continuous(discrete_action)
-                    else:
-                        a2 = player2.act(obs_agent2)
+                    a1 = self._resolve_eval_action(player1, env, obs)
+                    a2 = self._resolve_eval_action(player2, env, obs_agent2)
 
                     obs, r, d, _, info = env.step(np.hstack([a1,a2]))   
                     obs_agent2 = env.obs_agent_two()
@@ -451,12 +633,7 @@ class Training():
                 d = False
                 obs, info = env.reset()
                 while not d:
-                    
-                    if type(player1) == RainbowAgent:
-                        discrete_action = player1.act(env=env, state=obs, greedy=True) 
-                        a1 = self._discrete_to_continuous(discrete_action)
-                    else:
-                        a1 = player1.act(obs) 
+                    a1 = self._resolve_eval_action(player1, env, obs)
 
                     a2 = player2.act(obs_agent2)
 
@@ -470,6 +647,26 @@ class Training():
         env.close()
 
         return score["player1"]/num_episodes
+    
+    def _resolve_eval_action(self, player, env, obs):
+        if isinstance(player, RainbowAgent):
+            discrete_action = player.act(env=env, state=obs, greedy=True)
+            return self._discrete_to_continuous(discrete_action)
+        if isinstance(player, Agent):
+            return player.act(env=env, state=obs, greedy=True)
+        return player.act(obs)
+    
+    def _latest_self_play_stats(self):
+        episodes_seen = max(0, len(self.statistics["ep_rew"]) - 1)
+        parts = [f"episodes_seen={episodes_seen}", f"opponents_in_pool={self.population_size}"]
+
+        if len(self.statistics["mv_avg_rew"]) > 0:
+            parts.append(f"mv_avg_reward={self.statistics['mv_avg_rew'][-1]:.3f}")
+        if len(self.agent_against_basic_opp) > 0:
+            parts.append(f"basicopp_winrate={self.agent_against_basic_opp[-1]:.3f}")
+        if len(self.statistics["tr_loss"]) > 0:
+            parts.append(f"last_loss={self.statistics['tr_loss'][-1]:.4f}")
+        return " | ".join(parts)
     
     def save_performance_against_basic_opp(self):
         # ------ create performance_against_basic_opp plot ------
@@ -502,8 +699,15 @@ class Training():
             i_training_round):
 
         os.makedirs(population_path, exist_ok=True)
-        self.agent.save_dict(population_path, identifier_extension=f"_{self.population_size}")
+        save_index = self.population_size
+        self.agent.save_dict(population_path, identifier_extension=f"_{save_index}")
         self.population_size += 1
+        if self.verbose:
+            round_label = "initial_seed" if (save_index == 0 and i_training_round == 0) else str(i_training_round + 1)
+            print(
+                f"[SelfPlay] saved_opponent_snapshot={save_index} "
+                f"| from_round={round_label} | population_size={self.population_size}"
+            )
     
     def select_from_population(
             self,
@@ -514,40 +718,48 @@ class Training():
 
             if p < 0.2:
                 self.opponent = h_env.BasicOpponent(weak=False)
+                self.last_selected_opponent_info = "strong_basic_opponent"
 
             elif p < 0.5:
                 recent_idx = max(0, self.population_size - 3)
                 agent_index = np.random.randint(recent_idx, self.population_size)
                 load_path = os.path.join(population_path, self.MODEL_IDENTIFIER + f"_{agent_index}") + ".pth"
-                self.opponent = deepcopy(self.agent)
+                self.opponent = self._copy_agent_without_replay_buffer()
                 self.opponent.load_dict(load_path)
+                self.last_selected_opponent_info = f"recent_pool_agent_{agent_index}"
 
             else:
                 agent_index = np.random.randint(0, self.population_size)
                 load_path = os.path.join(population_path, self.MODEL_IDENTIFIER + f"_{agent_index}") + ".pth"
-                self.opponent = deepcopy(self.agent)
+                self.opponent = self._copy_agent_without_replay_buffer()
                 self.opponent.load_dict(load_path)
+                self.last_selected_opponent_info = f"random_pool_agent_{agent_index}"
         
         else:
             p = random.random()
             if p < 0.2:
                 self.opponent = h_env.BasicOpponent(weak=False)
+                self.last_selected_opponent_info = "fixed_pool_strong_basic"
             elif p < 0.4:
                 self.opponent = h_env.BasicOpponent(weak=True)
+                self.last_selected_opponent_info = "fixed_pool_weak_basic"
             else:
                 files = [f for f in os.listdir(self.fixed_opponents_path) if os.path.isfile(os.path.join(self.fixed_opponents_path, f))]
                 N = len(files)
                 if N != 0:
                     index = np.random.randint(0, N)
                     load_path = os.path.join(self.fixed_opponents_path, files[index])
-                    self.opponent = deepcopy(self.agent)
+                    self.opponent = self._copy_agent_without_replay_buffer()
                     self.opponent.load_dict(load_path)
+                    self.last_selected_opponent_info = f"fixed_pool_file_{files[index]}"
                 else:
                     p = random.random()
                     if p < 0.5:
                         self.opponent = h_env.BasicOpponent(weak=False)
+                        self.last_selected_opponent_info = "fallback_strong_basic"
                     else:
                         self.opponent = h_env.BasicOpponent(weak=True)
+                        self.last_selected_opponent_info = "fallback_weak_basic"
 
 
 

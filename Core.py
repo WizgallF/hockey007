@@ -114,8 +114,21 @@ class Core:
             if agent_name == "rainbow":
                 proxy_env = DiscreteActionWrapperHockey(env)
                 n_actions = proxy_env.action_space.n
-            state, info = proxy_env.reset()
-            n_observations = len(state)
+                state, info = proxy_env.reset()
+                n_observations = len(state)
+                single_player_action_space = None
+            elif agent_name == "ddpg":
+                state, info = env.reset()
+                n_observations = len(state)
+                single_player_action_space = spaces.Box(
+                    low=env.action_space.low[:4],
+                    high=env.action_space.high[:4],
+                    dtype=env.action_space.dtype,
+                )
+            else:
+                raise NotImplementedError
+        else:
+            raise NotImplementedError
 
     
         if agent_name == "rainbow": 
@@ -123,6 +136,14 @@ class Core:
                 n_observations,
                 n_actions,
                 verbose)
+            if agent_load_path is not None:
+                agent.load_dict(agent_load_path)
+        elif agent_name == "ddpg":
+            agent = DDPGAgent(
+                env.observation_space,
+                single_player_action_space,
+                verbose=verbose
+            )
             if agent_load_path is not None:
                 agent.load_dict(agent_load_path)
 

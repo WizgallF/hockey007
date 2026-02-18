@@ -141,6 +141,9 @@ class DDPGAgent(Agent):
         self.MODEL_IDENTIFIER = self._config["MODEL_IDENTIFIER"]
         self.NUM_EPISODES = self._config["NUM_EPISODES"]
         self.START_TRAINING = self._config["START_TRAINING"]
+        self.TRAINING_ROUNDS = int(self._config.get("TRAINING_ROUNDS", 80))
+        self.FIXED_OPPONENTS = bool(self._config.get("FIXED_OPPONENTS", False))
+        self.K_AGAINST_STRONG = int(self._config.get("K_AGAINST_STRONG", 0))
         self._eps = self._config["EPS"]
         self._use_distributional = bool(self._config["USE_DISTRIBUTIONAL"])
         self._num_quantiles = int(self._config["NUM_QUANTILES"])
@@ -411,8 +414,8 @@ class DDPGAgent(Agent):
 
         return losses
 
-    def save_dict(self, save_path: str = "") -> None:
-        saving_dir = os.path.join(save_path, f"{self.MODEL_IDENTIFIER}.pth")
+    def save_dict(self, save_path: str = "", identifier_extension: str = "") -> None:
+        saving_dir = os.path.join(save_path, f"{self.MODEL_IDENTIFIER}{identifier_extension}.pth")
         payload = {
             "policy": self.policy.state_dict(),
             "critic": self.Q.state_dict(),

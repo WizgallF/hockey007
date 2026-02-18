@@ -2,6 +2,7 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 import hockey.hockey_env as h_env
+from agents.AgentBaseclass import Agent
 from agents.RainbowAgent import RainbowAgent
 
 
@@ -27,6 +28,13 @@ class Envwrapper():
                 return self.env.step(np.hstack([self._convert_action(action_p1), self._convert_action(action_p2)]))
             else:
                 return self.env.step(np.hstack([action_p1, self._convert_action(action_p2)]))
+        elif isinstance(self.player2, Agent):
+            action_p2 = self.player2.act(env=self.env, state=obs_agent2, greedy=True)
+
+            if self.discrete_actions:
+                return self.env.step(np.hstack([self._convert_action(action_p1), action_p2]))
+            else:
+                return self.env.step(np.hstack([action_p1, action_p2]))
         else:
             action_p2 = self.player2.act(obs_agent2)
 
@@ -46,6 +54,8 @@ class Envwrapper():
             if key in {"weakopp", "weakopponent"}:
                 return h_env.BasicOpponent(weak=True)
         if isinstance(player, RainbowAgent):
+            return player
+        if isinstance(player, Agent):
             return player
         if isinstance(player, h_env.BasicOpponent):
             return player

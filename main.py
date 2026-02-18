@@ -20,7 +20,7 @@ def main ():
     parser.add_argument ( '--num_parallel_envs', type=int, default=1, help = "Number of parallel environments to use during training")
 
     parser.add_argument ( '--playagent_1_type', type=str, default="rainbow", help = "Specify the agent 1 to use for evaluation")
-    parser.add_argument ( '--playagent1_path', type=str, default="/home/stud217/hockey007/experiments_rainbow/fixed_opponent_pool/rainbow_NNDD.pth", help = "Path to the trained agent 1 for evaluation")
+    parser.add_argument ( '--playagent1_path', type=str, default=None, help = "Path to the trained agent 1 for evaluation")
     parser.add_argument ( '--playagent1_config', type=str, default="/home/nils-klute/Documents/machine_learning/Reinforcement Learning/hockey007/experiments_rainbow/2026-02-02_11-59-12_rainbow noise sigma0=0.5/config.yaml", help = "Path to the config file for agent 1 (only for evaluation)")
 
     parser.add_argument ( '--playagent_2_type', type=str, default="basicopp", help = "Specify the agent 2 to use for evaluation")
