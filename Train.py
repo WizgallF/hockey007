@@ -258,6 +258,7 @@ class Training():
         self.population_size = 0
         self.MODEL_IDENTIFIER = self.agent.MODEL_IDENTIFIER
         self.fixed_opponents = self.agent.FIXED_OPPONENTS
+        self.fixed_opponents_path = population_path
 
         # print hyperparameter settings to console 
         if self.verbose:
@@ -268,8 +269,7 @@ class Training():
 
 
         # Add random agent to population for self play
-        if not self.fixed_opponents:
-            population_path = os.path.join(self.experiment_path, "agent_population")
+        population_path = os.path.join(self.experiment_path, "agent_population")
     
         self.save_to_population(population_path, i_training_round=0)
         
@@ -532,7 +532,7 @@ class Training():
             elif p < 0.4:
                 self.opponent = h_env.BasicOpponent(weak=True)
             else:
-                files = [f for f in os.listdir(population_path) if os.path.isfile(f)]
+                files = [f for f in os.listdir(self.fixed_opponents_path) if os.path.isfile(f)]
                 N = len(files)
                 index = np.random.randint(0, N)
                 load_path = files[index]
