@@ -2,14 +2,14 @@
 MODEL_IDENTIFIER: "rainbow"
 ACTION_FILENAME: "configs/rainbow_actions.txt"
 
-DOUBLEQ_LEARNING: True   #
-DUELING: True   #
-NOISY: True    #
+DOUBLEQ_LEARNING: True   
+DUELING: True   
+NOISY: True    
 PRIORITIZED_REPLAY: False 
-DISTRIBUTIONAL_Q: False #
-N_STEP: 3   #
+DISTRIBUTIONAL_Q: False 
+N_STEP: 7   ##
 
-LR: 0.000125  #0.00025 
+LR: 0.000125  
 ADAM_BETA_1: 0.5
 ADAM_BETA_2: 0.999
 ADAM_EPS: 0.00015
@@ -17,11 +17,12 @@ BATCH_SIZE: 64
 GAMMA: 0.99
 
 BUFFER_SIZE: 1000000
-NUM_EPISODES: 3000   #3000 episode = 500k steps for self play num episodes= 10000 roughly 1M trans
+NUM_EPISODES: 1500   #3000 episode = 500k steps for self play num episodes= 10000 roughly 1M trans
 START_TRAINING: 1000
 ACTION_REPEAT: 1
-TRAINING_ROUNDS: 40 #20
-FIXED_OPPONENTS: True
+TRAINING_ROUNDS: 80 
+FIXED_OPPONENTS: True  ##
+K_AGAINST_STRONG: 10  ##
 
 PR_ALPHA: 0.6
 PR_BETA_START: 0.4 
