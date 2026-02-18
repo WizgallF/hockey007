@@ -20,12 +20,14 @@ def main ():
     parser.add_argument ( '--num_parallel_envs', type=int, default=1, help = "Number of parallel environments to use during training")
 
     parser.add_argument ( '--playagent_1_type', type=str, default="rainbow", help = "Specify the agent 1 to use for evaluation")
-    parser.add_argument ( '--playagent1_path', type=str, default="/home/nils-klute/Documents/machine_learning/Reinforcement Learning/hockey007/experiments_rainbow/2026-02-02_11-59-12_rainbow noise sigma0=0.5/rainbow.pth", help = "Path to the trained agent 1 for evaluation")
+    parser.add_argument ( '--playagent1_path', type=str, default="/home/stud217/hockey007/experiments_rainbow/fixed_opponent_pool/rainbow_NNDD.pth", help = "Path to the trained agent 1 for evaluation")
     parser.add_argument ( '--playagent1_config', type=str, default="/home/nils-klute/Documents/machine_learning/Reinforcement Learning/hockey007/experiments_rainbow/2026-02-02_11-59-12_rainbow noise sigma0=0.5/config.yaml", help = "Path to the config file for agent 1 (only for evaluation)")
 
     parser.add_argument ( '--playagent_2_type', type=str, default="basicopp", help = "Specify the agent 2 to use for evaluation")
     parser.add_argument ( '--playagent2_path', type=str, default="/home/nils-klute/Documents/machine_learning/Reinforcement Learning/hockey007/saved_agents/rainbow.pth", help = "Path to the trained agent 2 for evaluation")
     parser.add_argument ( '--playagent2_config', type=str, default=None, help = "Path to the config file for agent 2 (only for evaluation)")
+
+    parser.add_argument ( '--pop_path', type=str, default="/home/stud217/hockey007/experiments_rainbow/fixed_opponent_pool", help = "Path to the config file for agent 2 (only for evaluation)")
     
     parser.add_argument ( '--env', type=str, default="Hockey-One-v0", help = "Specify the environment to use for training/evaluation")
     parser.add_argument ( '--base_dir', type=str, default="experiments", help = "Specify the directory used for experimentation")
@@ -46,7 +48,14 @@ def main ():
             )
 
     elif args.train_self_play:
-        core.train_agent_self_play(args.agent, args.env, args.base_dir, args.int_agents, args.verbose, args.playagent1_path)
+        core.train_agent_self_play(
+            agent_name=args.agent, 
+            env_name=args.env, 
+            base_dir=args.base_dir, 
+            save_intermediate_agents=args.int_agents, 
+            verbose=args.verbose, 
+            agent_load_path=args.playagent1_path,
+            population_path=args.pop_path)
 
     elif args.play:        
         core.play(

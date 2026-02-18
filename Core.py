@@ -104,6 +104,7 @@ class Core:
             save_intermediate_agents: bool = False,
             verbose=False,
             agent_load_path = None,
+            population_path = None,
             bins = 5):
         
         print(agent_name)
@@ -132,7 +133,12 @@ class Core:
         
         train_class = Training(agent, env, base_dir, save_intermediate_agents, verbose)
         discrete_actions = agent_name == "rainbow"
-        train_class.train_self_play(agent, discrete_actions, agent_load_path)
+        
+        train_class.train_self_play(
+            opponent=agent, 
+            discrete_actions=discrete_actions, 
+            agent_load_path=agent_load_path,
+            population_path=population_path)
 
     def agent_against_human(self):
         pass

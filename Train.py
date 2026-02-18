@@ -246,7 +246,9 @@ class Training():
             self, 
             opponent,
             discrete_actions = False,
-            agent_load_path = None):
+            agent_load_path = None,
+            k_against_strong = 2,
+            population_path = None):
 
         torch.set_default_dtype(torch.float32)
 
@@ -254,6 +256,8 @@ class Training():
         self.opponent = deepcopy(opponent)
         self.best_opponent = deepcopy(opponent)
         self.population_size = 0
+        self.MODEL_IDENTIFIER = self.agent.MODEL_IDENTIFIER
+        self.fixed_opponents = self.agent.FIXED_OPPONENTS
 
         # print hyperparameter settings to console 
         if self.verbose:
@@ -264,7 +268,9 @@ class Training():
 
 
         # Add random agent to population for self play
-        population_path = os.path.join(self.experiment_path, "agent_population")
+        if not self.fixed_opponents:
+            population_path = os.path.join(self.experiment_path, "agent_population")
+    
         self.save_to_population(population_path, i_training_round=0)
         
 
@@ -278,7 +284,7 @@ class Training():
             # Wrap environment with Player 2
 
             # Train first two rounds against strong opponent
-            if i_training_round < 2:
+            if i_training_round < k_against_strong:
                 self.opponent = h_env.BasicOpponent(weak=False)
                 self.env = Envwrapper(self.original_env, self.opponent, discrete_actions)
             else:
@@ -504,23 +510,34 @@ class Training():
             self,
             population_path):
         
-        agent_index = np.random.randint(0, self.population_size)
-        load_path = os.path.join(population_path, self.opponent.MODEL_IDENTIFIER + f"_{agent_index}") + ".pth"
-        self.opponent.load_dict(load_path)
-
-        p = random.random()
-        if p < 0.2:
-            self.opponent = h_env.BasicOpponent(weak=False)
-        elif p < 0.5:
-            
-            recent_idx = max(0, self.population_size - 3)
-            agent_index = np.random.randint(recent_idx, self.population_size)
-            load_path = os.path.join(population_path, self.opponent.MODEL_IDENTIFIER + f"_{agent_index}") + ".pth"
-            self.opponent.load_dict(load_path)
+        if not self.fixed_opponents:
+            p = random.random()
+            if p < 0.2:
+                self.opponent = h_env.BasicOpponent(weak=False)
+            elif p < 0.5:
+                
+                recent_idx = max(0, self.population_size - 3)
+                agent_index = np.random.randint(recent_idx, self.population_size)
+                load_path = os.path.join(population_path, self.MODEL_IDENTIFIER + f"_{agent_index}") + ".pth"
+                self.opponent.load_dict(load_path)
+            else:
+                agent_index = np.random.randint(0, self.population_size)
+                load_path = os.path.join(population_path, self.MODEL_IDENTIFIER + f"_{agent_index}") + ".pth"
+                self.opponent.load_dict(load_path)
+        
         else:
-            agent_index = np.random.randint(0, self.population_size)
-            load_path = os.path.join(population_path, self.opponent.MODEL_IDENTIFIER + f"_{agent_index}") + ".pth"
-            self.opponent.load_dict(load_path)
+            p = random.random()
+            if p < 0.2:
+                self.opponent = h_env.BasicOpponent(weak=False)
+            elif p < 0.4:
+                self.opponent = h_env.BasicOpponent(weak=True)
+            else:
+                files = [f for f in os.listdir(population_path) if os.path.isfile(f)]
+                N = len(files)
+                index = np.random.randint(0, N)
+                load_path = files[index]
+                self.opponent.load_dict(load_path)
+
 
 
 
