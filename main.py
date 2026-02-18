@@ -20,10 +20,10 @@ def main ():
     parser.add_argument ( '--num_parallel_envs', type=int, default=1, help = "Number of parallel environments to use during training")
 
     parser.add_argument ( '--playagent_1_type', type=str, default="rainbow", help = "Specify the agent 1 to use for evaluation")
-    parser.add_argument ( '--playagent1_path', type=str, default="/home/stud217/hockey007/experiments/history/2026-02-02_11-59-12_rainbow noise sigma0=0.5/rainbow.pth", help = "Path to the trained agent 1 for evaluation")
-    parser.add_argument ( '--playagent1_config', type=str, default=None, help = "Path to the config file for agent 1 (only for evaluation)")
+    parser.add_argument ( '--playagent1_path', type=str, default="/home/nils-klute/Documents/machine_learning/Reinforcement Learning/hockey007/experiments_rainbow/2026-02-02_11-59-12_rainbow noise sigma0=0.5/rainbow.pth", help = "Path to the trained agent 1 for evaluation")
+    parser.add_argument ( '--playagent1_config', type=str, default="/home/nils-klute/Documents/machine_learning/Reinforcement Learning/hockey007/experiments_rainbow/2026-02-02_11-59-12_rainbow noise sigma0=0.5/config.yaml", help = "Path to the config file for agent 1 (only for evaluation)")
 
-    parser.add_argument ( '--playagent_2_type', type=str, default="rainbow", help = "Specify the agent 2 to use for evaluation")
+    parser.add_argument ( '--playagent_2_type', type=str, default="basicopp", help = "Specify the agent 2 to use for evaluation")
     parser.add_argument ( '--playagent2_path', type=str, default="/home/nils-klute/Documents/machine_learning/Reinforcement Learning/hockey007/saved_agents/rainbow.pth", help = "Path to the trained agent 2 for evaluation")
     parser.add_argument ( '--playagent2_config', type=str, default=None, help = "Path to the config file for agent 2 (only for evaluation)")
     
@@ -53,8 +53,8 @@ def main ():
             environment=args.env, 
             player1=args.playagent_1_type, 
             player2=args.playagent_2_type, 
-            agent_path=args.playagent1_path, 
-            config_path=args.playagent1_config, 
+            agent1_path=args.playagent1_path, 
+            agent1_config=args.playagent1_config, 
             agent2_path=args.playagent2_path, 
             agent2_config=args.playagent2_config)
 
