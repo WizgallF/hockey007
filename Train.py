@@ -278,6 +278,7 @@ class Training():
         start = time.time()
         best_mv_avg_reward = float('-inf')
         self.agent_against_basic_opp = []
+        self.agent_against_strong_opp = []
         self.last_selected_opponent_info = "none"
 
         if self.verbose:
@@ -419,11 +420,14 @@ class Training():
 
             if i_episode % 1000 == 0:
                 agent_basic_eval = self.agent_against_basicopp_eval(self.agent)
+                agent_strong_eval = self.agent_against_basicopp_eval(self.agent, weak=False)
                 self.agent_against_basic_opp.append(agent_basic_eval)
+                self.agent_against_strong_opp.append(agent_strong_eval)
                 if self.verbose:
                     print(
                         f"[SelfPlay][Round {i_training_round + 1}] "
                         f"basicopp_eval@episode={i_episode} | winrate={agent_basic_eval:.3f}"
+                        f"basicopp_eval@episode={i_episode} | winrate={agent_strong_eval:.3f}"
                     )
     
     def _load_population_opponents(
@@ -525,11 +529,14 @@ class Training():
                 while episodes_finished >= next_basic_eval_episode:
                     eval_episode = next_basic_eval_episode
                     agent_basic_eval = self.agent_against_basicopp_eval(self.agent)
+                    agent_strong_eval = self.agent_against_basicopp_eval(self.agent, weak=False)
                     self.agent_against_basic_opp.append(agent_basic_eval)
+                    self.agent_against_strong_opp.append(agent_strong_eval)
                     if self.verbose:
                         print(
                             f"[SelfPlay][Round {i_training_round + 1}] "
                             f"basicopp_eval@episode={eval_episode} | winrate={agent_basic_eval:.3f}"
+                            f"basicopp_eval@episode={eval_episode} | winrate={agent_strong_eval:.3f}"
                         )
                     next_basic_eval_episode += 1000
 
@@ -617,6 +624,7 @@ class Training():
     def agent_against_basicopp_eval(
             self, 
             player1,
+            weak=True,
             environment = 'Hockey-One-v0',
             num_episodes = 50):
         
@@ -627,7 +635,7 @@ class Training():
             score = {"player1": 0, "player2": 0}
 
             
-            player2 = h_env.BasicOpponent()
+            player2 = h_env.BasicOpponent(weak=weak)
 
             for _ in range(num_episodes):
                 d = False
@@ -676,6 +684,14 @@ class Training():
         plt.ylabel("Proportion of games won")
         plt.title("Performance against basic opponent")
         plt.savefig(os.path.join(self.experiment_path, f"basic_opponent-{self.agent.MODEL_IDENTIFIER}.png"), dpi=300)
+        plt.close()
+        # ------ create performance_against_strong_opp plot ------
+        plt.figure(figsize=(8, 6), dpi=300)
+        plt.plot(np.array(self.agent_against_strong_opp ), label="Mean Q", color="blue", linewidth=1.5)
+        plt.xlabel("Episodes (1k intervall)")
+        plt.ylabel("Proportion of games won")
+        plt.title("Performance against strong opponent")
+        plt.savefig(os.path.join(self.experiment_path, f"strong_opponent-{self.agent.MODEL_IDENTIFIER}.png"), dpi=300)
         plt.close()
     
     def _discrete_to_continuous(self, discrete_action):
