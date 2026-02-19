@@ -33,12 +33,14 @@ class TDMPC2Agent(Agent):
             action_space,
             observation_space,
             verbose = False,
-            config_overrides: dict | None = None
+            config_overrides: dict | None = None,
+            config_path = None
             ):
 
         # ------ load configs from "tdmpc_config.yaml" ------
         repo_root = Path(__file__).resolve().parent.parent
-        config_path = repo_root / "configs" / "tdmpc_config.yaml"
+        if not config_path:
+            config_path = repo_root / "configs" / "tdmpc_config.yaml"
         with open(config_path, "r") as f:
             config = yaml.safe_load(f) or {}
         if config_overrides:
