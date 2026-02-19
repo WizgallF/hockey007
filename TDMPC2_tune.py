@@ -55,6 +55,8 @@ INT_PARAMS = {
     "MPC_ITERS",
     "Z_DIM",
     "HIDDEN_DIM",
+    "Q_ENSEMBLE_SIZE",
+    "EPISTEMIC_BONUS_DECAY_STEPS",
 }
 
 
@@ -67,7 +69,7 @@ DEFAULT_GRID = {
 }
 
 
-SWEEP_META_KEYS = {"num_parallel_envs", "num_episodes"}
+SWEEP_META_KEYS = {"num_parallel_envs", "num_episodes", "training_rounds"}
 
 
 def _load_grid_config(path: str) -> Dict[str, Any]:
@@ -222,6 +224,11 @@ def _resolve_num_episodes(cfg: Dict[str, Any], args: argparse.Namespace) -> int 
     return int(raw)
 
 
+def _resolve_training_rounds(cfg: Dict[str, Any], args: argparse.Namespace) -> int:
+    raw = cfg.get("training_rounds", cfg.get("TRAINING_ROUNDS", args.training_rounds))
+    return max(1, int(raw))
+
+
 def _metric_value_or_floor(score: float, floor: float = -1e12) -> float:
     val = float(score)
     if np.isfinite(val):
@@ -241,16 +248,68 @@ def _build_env_bundle(env_name: str, num_parallel_envs: int):
     return env, obs_space, act_space
 
 
+def _build_self_play_bundle():
+    env = h_env.HockeyEnv()
+    obs_space = env.observation_space
+    if not isinstance(env.action_space, spaces.Box):
+        raise RuntimeError("Self-play requires a continuous Box action space.")
+    low = np.asarray(env.action_space.low, dtype=np.float32).reshape(-1)
+    high = np.asarray(env.action_space.high, dtype=np.float32).reshape(-1)
+    if low.shape[0] < 4 or high.shape[0] < 4:
+        raise RuntimeError("Could not extract single-player action space (expected at least 4 action dims).")
+    act_space = spaces.Box(
+        low=low[:4],
+        high=high[:4],
+        shape=(4,),
+        dtype=np.float32,
+    )
+    return env, obs_space, act_space
+
+
 def _run_training_once(
     cfg_dict: Dict[str, Any],
     args: argparse.Namespace,
     allow_partial_on_interrupt: bool = False,
 ):
     run_cfg = dict(cfg_dict)
-    num_parallel_envs = _resolve_num_parallel_envs(run_cfg, args)
     num_episodes = _resolve_num_episodes(run_cfg, args)
+    training_rounds = _resolve_training_rounds(run_cfg, args)
+    num_parallel_envs = _resolve_num_parallel_envs(run_cfg, args)
     for key in SWEEP_META_KEYS:
         run_cfg.pop(key, None)
+
+    if args.self_play:
+        if args.env != "Hockey-One-v0":
+            raise RuntimeError("Self-play is currently supported only for Hockey-One-v0.")
+        env, obs_space, act_space = _build_self_play_bundle()
+        try:
+            agent = _build_agent(act_space, obs_space, run_cfg)
+            opponent = _build_agent(act_space, obs_space, run_cfg)
+            if num_episodes is not None:
+                agent.NUM_EPISODES = int(num_episodes)
+                opponent.NUM_EPISODES = int(num_episodes)
+            agent.TRAINING_ROUNDS = int(training_rounds)
+            opponent.TRAINING_ROUNDS = int(training_rounds)
+
+            trainer = Training(
+                agent=agent,
+                env=env,
+                base_dir=args.base_dir,
+                save_intermediate_agents=False,
+                verbose=args.verbose,
+            )
+            interrupted = False
+            try:
+                trainer.train_self_play(opponent, discrete_actions=False)
+            except KeyboardInterrupt:
+                if not allow_partial_on_interrupt:
+                    raise
+                interrupted = True
+
+            score = score_from_stats(trainer.statistics, trainer.mavg_window_size)
+            return score, trainer.experiment_path, 1, interrupted
+        finally:
+            env.close()
 
     env, obs_space, act_space = _build_env_bundle(args.env, num_parallel_envs)
     try:
@@ -424,22 +483,44 @@ def _apply_overrides_compat(agent: Any, cfg_dict: Dict[str, Any]) -> None:
         agent.horizon = cfg_dict.get("HORIZON", agent.TRAIN_HORIZON)
         agent._a_mean = torch.zeros(agent.horizon, agent.act_dim, device=agent.device)
 
-    # Recreate optimizers if optimizer hyperparams were overridden
-    if any(k in cfg_dict for k in ("LR", "ADAM_BETA_1", "ADAM_BETA_2", "ADAM_EPS")):
-        agent.LR = cfg_dict.get("LR", agent.LR)
-        agent.ADAM_BETA_1 = cfg_dict.get("ADAM_BETA_1", agent.ADAM_BETA_1)
-        agent.ADAM_BETA_2 = cfg_dict.get("ADAM_BETA_2", agent.ADAM_BETA_2)
-        agent.ADAM_EPS = cfg_dict.get("ADAM_EPS", agent.ADAM_EPS)
-        agent.optimizer = optim.Adam(
-            agent.model.parameters(),
-            lr=agent.LR,
-            betas=(agent.ADAM_BETA_1, agent.ADAM_BETA_2),
-            eps=agent.ADAM_EPS,
-        )
-
-    if "PI_LR" in cfg_dict:
-        agent.PI_LR = cfg_dict.get("PI_LR", agent.PI_LR)
-        agent.pi_optimizer = optim.Adam(agent.model.pi.parameters(), lr=agent.PI_LR)
+    # Recreate optimizers if optimizer settings were overridden
+    optimizer_keys = {
+        "OPTIMIZER",
+        "LR",
+        "PI_LR",
+        "WEIGHT_DECAY",
+        "PI_WEIGHT_DECAY",
+        "ADAM_BETA_1",
+        "ADAM_BETA_2",
+        "ADAM_EPS",
+        "MUON_LR",
+        "MUON_PI_LR",
+        "MUON_MOMENTUM",
+        "MUON_WEIGHT_DECAY",
+        "MUON_PI_WEIGHT_DECAY",
+        "MUON_ADAM_LR",
+        "MUON_ADAM_BETA_1",
+        "MUON_ADAM_BETA_2",
+        "MUON_ADAM_EPS",
+        "MUON_ADAM_WEIGHT_DECAY",
+        "MUON_PI_ADAM_LR",
+        "MUON_PI_ADAM_WEIGHT_DECAY",
+    }
+    if any(k in cfg_dict for k in optimizer_keys):
+        for k in optimizer_keys:
+            if k in cfg_dict:
+                setattr(agent, k, cfg_dict[k])
+        if hasattr(agent, "_reset_optimizers"):
+            agent._reset_optimizers()
+        else:
+            # Backward-compatible fallback to Adam
+            agent.optimizer = optim.Adam(
+                agent.model.parameters(),
+                lr=agent.LR,
+                betas=(agent.ADAM_BETA_1, agent.ADAM_BETA_2),
+                eps=agent.ADAM_EPS,
+            )
+            agent.pi_optimizer = optim.Adam(agent.model.pi.parameters(), lr=agent.PI_LR)
 
     # Recreate replay buffer if its construction params were overridden
     if any(k in cfg_dict for k in ("CAPACITY", "PRIORITIZED", "ALPHA", "BETA", "EPSILON", "SEED")):
@@ -470,8 +551,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--wandb_mode", type=str, default=None, help="online|offline|disabled")
     parser.add_argument("--num_parallel_envs", type=int, default=1)
     parser.add_argument("--num_episodes", type=int, default=None)
+    parser.add_argument("--training_rounds", type=int, default=1)
     parser.add_argument("--max_runs", type=int, default=None)
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument(
+        "--self_play",
+        action="store_true",
+        help="Use self-play training (Hockey-One-v0 only).",
+    )
     parser.add_argument(
         "--sweep",
         action="store_true",

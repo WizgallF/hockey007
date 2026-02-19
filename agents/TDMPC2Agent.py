@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+import importlib
 import numpy as np
 import torch
 import torch.nn as nn
@@ -84,16 +85,46 @@ class TDMPC2Agent(Agent):
         # ------ training schedule ------
         self.NUM_EPISODES = getattr(self, "NUM_EPISODES", 1000)
         self.START_TRAINING = getattr(self, "START_TRAINING", 0)
+        self.TRAINING_ROUNDS = getattr(self, "TRAINING_ROUNDS", 1)
 
         # ------ model sizes ------
         self.Z_DIM = getattr(self, "Z_DIM", 256)
         self.HIDDEN_DIM = getattr(self, "HIDDEN_DIM", 512)
+        self.Q_ENSEMBLE_SIZE = max(1, int(getattr(self, "Q_ENSEMBLE_SIZE", 8)))
 
         # ------ optimizer params ------
         self.LR = getattr(self, "LR", 3e-4)
         self.ADAM_BETA_1 = getattr(self, "ADAM_BETA_1", 0.9)
         self.ADAM_BETA_2 = getattr(self, "ADAM_BETA_2", 0.999)
         self.ADAM_EPS = getattr(self, "ADAM_EPS", 1e-8)
+        self.WEIGHT_DECAY = float(getattr(self, "WEIGHT_DECAY", 0.0))
+        self.OPTIMIZER = str(getattr(self, "OPTIMIZER", "adam")).lower()
+
+        # Optional separate policy optimizer params
+        self.PI_LR = float(getattr(self, "PI_LR", self.LR))
+        self.PI_WEIGHT_DECAY = float(getattr(self, "PI_WEIGHT_DECAY", self.WEIGHT_DECAY))
+
+        # Muon (KellerJordan) hyperparameters
+        self.MUON_LR = float(getattr(self, "MUON_LR", self.LR))
+        self.MUON_PI_LR = float(getattr(self, "MUON_PI_LR", self.PI_LR))
+        self.MUON_MOMENTUM = float(getattr(self, "MUON_MOMENTUM", 0.95))
+        self.MUON_WEIGHT_DECAY = float(getattr(self, "MUON_WEIGHT_DECAY", 0.0))
+        self.MUON_PI_WEIGHT_DECAY = float(
+            getattr(self, "MUON_PI_WEIGHT_DECAY", self.MUON_WEIGHT_DECAY)
+        )
+
+        # Auxiliary Adam hyperparameters for non-matrix params in Muon optimizer
+        self.MUON_ADAM_LR = float(getattr(self, "MUON_ADAM_LR", self.LR))
+        self.MUON_ADAM_BETA_1 = float(getattr(self, "MUON_ADAM_BETA_1", self.ADAM_BETA_1))
+        self.MUON_ADAM_BETA_2 = float(getattr(self, "MUON_ADAM_BETA_2", self.ADAM_BETA_2))
+        self.MUON_ADAM_EPS = float(getattr(self, "MUON_ADAM_EPS", self.ADAM_EPS))
+        self.MUON_ADAM_WEIGHT_DECAY = float(
+            getattr(self, "MUON_ADAM_WEIGHT_DECAY", self.WEIGHT_DECAY)
+        )
+        self.MUON_PI_ADAM_LR = float(getattr(self, "MUON_PI_ADAM_LR", self.PI_LR))
+        self.MUON_PI_ADAM_WEIGHT_DECAY = float(
+            getattr(self, "MUON_PI_ADAM_WEIGHT_DECAY", self.PI_WEIGHT_DECAY)
+        )
 
         # ------ replay buffer params ------
         self.CAPACITY = getattr(self, "CAPACITY", int(1e6))
@@ -113,6 +144,20 @@ class TDMPC2Agent(Agent):
         # Optional exploration noise on executed action
         self.EXPL_NOISE  = getattr(self, "EXPL_NOISE", 0.1)
 
+        # Optional epistemic bonus for MPC trajectory scoring
+        self.USE_EPISTEMIC_EXPLORATION = bool(
+            getattr(self, "USE_EPISTEMIC_EXPLORATION", False)
+        )
+        self.EPISTEMIC_BONUS_BETA = float(getattr(self, "EPISTEMIC_BONUS_BETA", 0.0))
+        self.EPISTEMIC_BONUS_BETA_END = float(
+            getattr(self, "EPISTEMIC_BONUS_BETA_END", self.EPISTEMIC_BONUS_BETA)
+        )
+        self.EPISTEMIC_BONUS_DECAY_STEPS = max(
+            1, int(getattr(self, "EPISTEMIC_BONUS_DECAY_STEPS", 1))
+        )
+        self.EPISTEMIC_METHOD = str(getattr(self, "EPISTEMIC_METHOD", "ensemble")).lower()
+        self.EPISTEMIC_NORMALIZE = bool(getattr(self, "EPISTEMIC_NORMALIZE", True))
+
         # Warm-start mean action sequence (in [-1,1])
         self._a_mean = torch.zeros(self.horizon, self.act_dim, device=self.device)
 
@@ -122,6 +167,7 @@ class TDMPC2Agent(Agent):
             act_dim=self.act_dim,
             z_dim=self.Z_DIM,
             hidden=self.HIDDEN_DIM,
+            q_ensemble_size=self.Q_ENSEMBLE_SIZE,
         )
         self.model.to(self.device)
 
@@ -139,9 +185,6 @@ class TDMPC2Agent(Agent):
         self.LAMBDA_W = getattr(self, "LAMBDA_W", 0.9)      # time weighting across horizon
         self.GRAD_CLIP = getattr(self, "GRAD_CLIP", 10.0)
 
-        # Optional: separate optimizer for policy prior (cleaner)
-        self.PI_LR = getattr(self, "PI_LR", self.LR)
-        self.pi_optimizer = optim.Adam(self.model.pi.parameters(), lr=self.PI_LR)
         self.replay_buffer = TDMPC2ReplayBuffer(
             capacity_steps=self.CAPACITY,
             prioritized=self.PRIORITIZED,
@@ -151,8 +194,8 @@ class TDMPC2Agent(Agent):
             seed=self.SEED
         )
 
-        # ------ optimizer ------
-        self.optimizer = optim.Adam(self.model.parameters(), lr=self.LR, betas=(self.ADAM_BETA_1, self.ADAM_BETA_2), eps=self.ADAM_EPS)
+        # ------ optimizers ------
+        self._reset_optimizers()
 
     def _soft_update(self, tau: float) -> None:
         with torch.no_grad():
@@ -170,6 +213,185 @@ class TDMPC2Agent(Agent):
             return action
         norm = 2.0 * (action - self._action_low) / (self._action_high - self._action_low + 1e-8) - 1.0
         return np.clip(norm, -1.0, 1.0)
+
+    def _resolve_muon_optimizer_cls(self):
+        candidates = (
+            ("muon", "SingleDeviceMuonWithAuxAdam"),
+            ("muon_optimizer", "SingleDeviceMuonWithAuxAdam"),
+            ("muon_optimizer.muon", "SingleDeviceMuonWithAuxAdam"),
+        )
+        for module_name, class_name in candidates:
+            try:
+                module = importlib.import_module(module_name)
+            except Exception:
+                continue
+            cls = getattr(module, class_name, None)
+            if cls is not None:
+                return cls
+        return None
+
+    def _build_adam_optimizer(self, params, lr: float, weight_decay: float):
+        return optim.Adam(
+            params,
+            lr=float(lr),
+            betas=(self.ADAM_BETA_1, self.ADAM_BETA_2),
+            eps=self.ADAM_EPS,
+            weight_decay=float(weight_decay),
+        )
+
+    def _build_muon_optimizer(
+        self,
+        params,
+        muon_lr: float,
+        muon_weight_decay: float,
+        adam_lr: float,
+        adam_weight_decay: float,
+    ):
+        muon_cls = self._resolve_muon_optimizer_cls()
+        if muon_cls is None:
+            raise RuntimeError(
+                "OPTIMIZER='muon' requested, but Muon is not installed. "
+                "Install KellerJordan Muon, e.g. "
+                "`pip install git+https://github.com/KellerJordan/Muon`."
+            )
+
+        params = [p for p in params if p.requires_grad]
+        matrix_params = [p for p in params if p.ndim >= 2]
+        aux_params = [p for p in params if p.ndim < 2]
+
+        # Muon requires at least one matrix-shaped parameter group.
+        if len(matrix_params) == 0:
+            return self._build_adam_optimizer(params, lr=adam_lr, weight_decay=adam_weight_decay)
+
+        param_groups = [
+            dict(
+                params=matrix_params,
+                lr=float(muon_lr),
+                momentum=float(self.MUON_MOMENTUM),
+                weight_decay=float(muon_weight_decay),
+                use_muon=True,
+            )
+        ]
+        if len(aux_params) > 0:
+            param_groups.append(
+                dict(
+                    params=aux_params,
+                    lr=float(adam_lr),
+                    betas=(self.MUON_ADAM_BETA_1, self.MUON_ADAM_BETA_2),
+                    eps=float(self.MUON_ADAM_EPS),
+                    weight_decay=float(adam_weight_decay),
+                    use_muon=False,
+                )
+            )
+
+        return muon_cls(param_groups)
+
+    def _reset_optimizers(self) -> None:
+        opt = self.OPTIMIZER.lower()
+        if opt == "adam":
+            self.optimizer = self._build_adam_optimizer(
+                self.model.parameters(),
+                lr=self.LR,
+                weight_decay=self.WEIGHT_DECAY,
+            )
+            self.pi_optimizer = self._build_adam_optimizer(
+                self.model.pi.parameters(),
+                lr=self.PI_LR,
+                weight_decay=self.PI_WEIGHT_DECAY,
+            )
+            return
+
+        if opt == "muon":
+            self.optimizer = self._build_muon_optimizer(
+                self.model.parameters(),
+                muon_lr=self.MUON_LR,
+                muon_weight_decay=self.MUON_WEIGHT_DECAY,
+                adam_lr=self.MUON_ADAM_LR,
+                adam_weight_decay=self.MUON_ADAM_WEIGHT_DECAY,
+            )
+            self.pi_optimizer = self._build_muon_optimizer(
+                self.model.pi.parameters(),
+                muon_lr=self.MUON_PI_LR,
+                muon_weight_decay=self.MUON_PI_WEIGHT_DECAY,
+                adam_lr=self.MUON_PI_ADAM_LR,
+                adam_weight_decay=self.MUON_PI_ADAM_WEIGHT_DECAY,
+            )
+            return
+
+        raise ValueError(
+            f"Unsupported OPTIMIZER='{self.OPTIMIZER}'. Expected one of: 'adam', 'muon'."
+        )
+
+    def _current_epistemic_beta(self) -> float:
+        if not self.USE_EPISTEMIC_EXPLORATION:
+            return 0.0
+        frac = min(1.0, float(self.t) / float(self.EPISTEMIC_BONUS_DECAY_STEPS))
+        return self.EPISTEMIC_BONUS_BETA + frac * (
+            self.EPISTEMIC_BONUS_BETA_END - self.EPISTEMIC_BONUS_BETA
+        )
+
+    def _standardize(self, x: torch.Tensor) -> torch.Tensor:
+        mean = x.mean()
+        std = x.std(unbiased=False)
+        return (x - mean) / (std + 1e-6)
+
+    def _epistemic_uncertainty(
+        self,
+        obs: torch.Tensor,
+        zs: torch.Tensor,
+        rs: torch.Tensor,
+        a_seq: torch.Tensor,
+        discounts: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Estimates trajectory-level epistemic uncertainty for MPC scoring.
+        """
+        N, H, _ = a_seq.shape
+        method = self.EPISTEMIC_METHOD
+        use_q = method in {"q", "q_disagreement", "combined", "both"}
+        use_ens = method in {"ensemble"}
+        use_model = method in {"model", "model_disagreement", "combined", "both"}
+        if not use_q and not use_ens and not use_model:
+            use_q = True
+
+        terms = []
+
+        if use_q:
+            q1, q2 = self.model.q(
+                zs[:, :-1, :].reshape(N * H, -1),
+                a_seq.reshape(N * H, -1),
+            )
+            q_disc = (q1 - q2).abs().view(N, H)
+            q_unc = (q_disc * discounts).sum(dim=1)
+            terms.append(q_unc)
+
+        if use_ens:
+            q_var = self.model.q.variance(
+                zs[:, :-1, :].reshape(N * H, -1),
+                a_seq.reshape(N * H, -1),
+            ).view(N, H)
+            ens_unc = (q_var * discounts).sum(dim=1)
+            terms.append(ens_unc)
+
+        if use_model:
+            z0_targ = self.target_model.encoder(obs).repeat(N, 1)
+            zs_targ, rs_targ = self.target_model.rollout(z0_targ, a_seq)
+
+            z_disc = (zs[:, 1:, :] - zs_targ[:, 1:, :]).pow(2).mean(dim=-1)
+            r_disc = (rs - rs_targ).pow(2)
+
+            z_unc = (z_disc * discounts).sum(dim=1)
+            r_unc = (r_disc * discounts).sum(dim=1)
+            model_unc = torch.sqrt(z_unc + r_unc + 1e-8)
+            terms.append(model_unc)
+
+        if len(terms) == 0:
+            return torch.zeros(N, device=self.device)
+
+        if self.EPISTEMIC_NORMALIZE:
+            terms = [self._standardize(t) for t in terms]
+
+        return torch.stack(terms, dim=0).mean(dim=0)
 
     @torch.no_grad()
     def act(self, env, state, episode_i, statistics) -> np.ndarray:
@@ -195,6 +417,8 @@ class TDMPC2Agent(Agent):
         # --- 2) MPPI: iterative refinement of mean action sequence ---
         mean = self._a_mean.clone()  # [H, act_dim]
         sigma = self.MPC_SIGMA
+        beta = self._current_epistemic_beta()
+        last_uncertainty = None
 
         for _ in range(iters):
             # sample around mean: [N, H, act_dim]
@@ -221,10 +445,22 @@ class TDMPC2Agent(Agent):
             # total score: discounted sum of rewards + discounted terminal value
             # rs: [N,H]
             returns = (rs * discounts).sum(dim=1) + (self.GAMMA ** H) * vH  # [N]
+            planning_score = returns
+
+            if beta > 0.0:
+                uncertainty = self._epistemic_uncertainty(
+                    obs=obs,
+                    zs=zs,
+                    rs=rs,
+                    a_seq=a_seq,
+                    discounts=discounts,
+                )
+                planning_score = planning_score + beta * uncertainty
+                last_uncertainty = uncertainty
 
             # MPPI weights (softmax over returns)
             # stabilize by subtracting max
-            scaled = (returns - returns.max()) / max(self.MPC_TEMP, 1e-6)
+            scaled = (planning_score - planning_score.max()) / max(self.MPC_TEMP, 1e-6)
             w = torch.softmax(scaled, dim=0)  # [N]
 
             # update mean: weighted average of sampled sequences
@@ -247,6 +483,13 @@ class TDMPC2Agent(Agent):
         a_env = unnormalize(a).cpu().numpy()
         if self._action_shape is not None and self._action_low is not None:
             a_env = a_env.reshape(self._action_shape)
+        self.t += 1
+
+        if statistics is not None:
+            if "epistemic_beta" in statistics:
+                statistics["epistemic_beta"].append(float(beta))
+            if last_uncertainty is not None and "epistemic_unc" in statistics:
+                statistics["epistemic_unc"].append(float(last_uncertainty.mean().item()))
         return a_env
 
         
@@ -329,24 +572,29 @@ class TDMPC2Agent(Agent):
         r_hat = self.model.reward(z.reshape(B*H, -1), act.reshape(B*H, -1)).view(B, H)  # [B,H]
         rew_loss_t = F.mse_loss(r_hat, rew, reduction="none")  # [B,H]
 
-        # ---- Q prediction ----
-        q1, q2 = self.model.q(z.reshape(B*H, -1), act.reshape(B*H, -1))
-        q1 = q1.view(B, H)
-        q2 = q2.view(B, H)
+        # ---- Q prediction (ensemble) ----
+        n_q = int(self.model.q.ensemble_size)
+        q_all = self.model.q.all(
+            z.reshape(B * H, -1),
+            act.reshape(B * H, -1),
+        ).view(n_q, B, H)
 
         # ---- TD target using target networks ----
         with torch.no_grad():
             # next action from target policy prior
             a_next = self.target_model.pi(z_next_targ.reshape(B*H, -1)).view(B, H, -1)
-            # target double Q
-            tq1, tq2 = self.target_model.q(
+            # target min over ensemble Q
+            tq = self.target_model.q.min(
                 z_next_targ.reshape(B*H, -1),
                 a_next.reshape(B*H, -1)
-            )
-            tq = torch.min(tq1, tq2).view(B, H)
+            ).view(B, H)
             y = rew + (self.GAMMA * not_done) * tq  # [B,H]
 
-        q_loss_t = (F.mse_loss(q1, y, reduction="none") + F.mse_loss(q2, y, reduction="none"))  # [B,H]
+        q_loss_t = F.mse_loss(
+            q_all,
+            y.unsqueeze(0).expand_as(q_all),
+            reduction="none",
+        ).mean(dim=0)  # [B,H]
 
         # ---- aggregate per-sample loss (PER weights apply per sample) ----
         per_sample = (t_w * (rep_loss_t + rew_loss_t + q_loss_t)).mean(dim=1)  # [B]
@@ -377,7 +625,8 @@ class TDMPC2Agent(Agent):
         # ---- PER priority update: use mean abs TD error over horizon (or first step) ----
         if getattr(self, "PRIORITIZED", False):
             with torch.no_grad():
-                td_err = (torch.min(q1, q2) - y).abs()            # [B,H]
+                q_min = q_all.min(dim=0).values
+                td_err = (q_min - y).abs()            # [B,H]
                 pr = (t_w * td_err).mean(dim=1).detach().cpu().numpy()  # [B]
             self.replay_buffer.update_priorities(idxes, pr)
 
@@ -389,7 +638,8 @@ class TDMPC2Agent(Agent):
 
     def save_dict(
             self,
-            save_path: str = ""
+            save_path: str = "",
+            identifier_extension: str = "",
             ):
         """
         Save the models state dict to specified path.
@@ -397,7 +647,7 @@ class TDMPC2Agent(Agent):
         Parameter:
             save_path: The path where the model's state dictionary will be saved
         """
-        saving_dir = os.path.join(save_path, self.MODEL_IDENTIFIER + ".pth")
+        saving_dir = os.path.join(save_path, self.MODEL_IDENTIFIER + identifier_extension + ".pth")
         torch.save(self.model.state_dict(), saving_dir)
     
     

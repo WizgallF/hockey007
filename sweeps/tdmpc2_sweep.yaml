@@ -4,14 +4,78 @@ metric:
   name: best_mavg_rew
   goal: maximize
 parameters:
+  OPTIMIZER:
+    values: ["adam", "muon"]
   LR:
     distribution: log_uniform_values
     min: 1.0e-05
     max: 5.0e-04
+  PI_LR:
+    distribution: log_uniform_values
+    min: 1.0e-05
+    max: 5.0e-04
+  WEIGHT_DECAY:
+    distribution: uniform
+    min: 0.0
+    max: 0.0001
+  PI_WEIGHT_DECAY:
+    distribution: uniform
+    min: 0.0
+    max: 0.0001
+  MUON_LR:
+    distribution: log_uniform_values
+    min: 1.0e-05
+    max: 5.0e-03
+  MUON_PI_LR:
+    distribution: log_uniform_values
+    min: 1.0e-05
+    max: 5.0e-03
+  MUON_MOMENTUM:
+    distribution: uniform
+    min: 0.9
+    max: 0.99
+  MUON_WEIGHT_DECAY:
+    distribution: uniform
+    min: 0.0
+    max: 0.001
+  MUON_PI_WEIGHT_DECAY:
+    distribution: uniform
+    min: 0.0
+    max: 0.001
+  MUON_ADAM_LR:
+    distribution: log_uniform_values
+    min: 1.0e-05
+    max: 5.0e-04
+  MUON_ADAM_BETA_1:
+    distribution: uniform
+    min: 0.8
+    max: 0.95
+  MUON_ADAM_BETA_2:
+    distribution: uniform
+    min: 0.95
+    max: 0.999
+  MUON_ADAM_EPS:
+    distribution: log_uniform_values
+    min: 1.0e-08
+    max: 1.0e-05
+  MUON_ADAM_WEIGHT_DECAY:
+    distribution: uniform
+    min: 0.0
+    max: 0.0001
+  MUON_PI_ADAM_LR:
+    distribution: log_uniform_values
+    min: 1.0e-05
+    max: 5.0e-04
+  MUON_PI_ADAM_WEIGHT_DECAY:
+    distribution: uniform
+    min: 0.0
+    max: 0.0001
   BATCH_SIZE:
     values: [128, 256, 512]
   TRAIN_HORIZON:
     values: [8, 12, 16]
+  Q_ENSEMBLE_SIZE:
+    values: [8]
   MPC_SAMPLES:
     values: [256, 512]
   MPC_ITERS:
@@ -28,6 +92,20 @@ parameters:
     distribution: uniform
     min: 0.05
     max: 0.2
+  USE_EPISTEMIC_EXPLORATION:
+    values: [true]
+  EPISTEMIC_BONUS_BETA:
+    distribution: uniform
+    min: 0.0
+    max: 2.0
+  EPISTEMIC_BONUS_BETA_END:
+    values: [0.0]
+  EPISTEMIC_BONUS_DECAY_STEPS:
+    values: [200000]
+  EPISTEMIC_METHOD:
+    values: ["ensemble", "combined"]
+  EPISTEMIC_NORMALIZE:
+    values: [true]
   TAU:
     distribution: uniform
     min: 0.005
@@ -36,14 +114,15 @@ parameters:
     distribution: uniform
     min: 0.95
     max: 0.999
-  num_parallel_envs:
-    values: [1, 4, 8, 16]
+  training_rounds:
+    values: [1]
 run_cap: 200
 command:
   - ${env}
   - python3
   - ${program}
   - --sweep
+  - --self_play
   - --env
   - Hockey-One-v0
   - --base_dir

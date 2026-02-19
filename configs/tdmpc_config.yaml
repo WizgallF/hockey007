@@ -6,11 +6,37 @@ START_TRAINING: 0
 
 Z_DIM: 256
 HIDDEN_DIM: 512
+Q_ENSEMBLE_SIZE: 8
 
 LR: 0.0003
 ADAM_BETA_1: 0.9
 ADAM_BETA_2: 0.999
 ADAM_EPS: 0.00001
+WEIGHT_DECAY: 0.0
+
+# Optimizer switch: "adam" | "muon"
+# Muon requires: pip install git+https://github.com/KellerJordan/Muon
+OPTIMIZER: "adam"
+
+# Policy optimizer defaults
+PI_LR: 0.0003
+PI_WEIGHT_DECAY: 0.0
+
+# Muon (KellerJordan) optimizer hyperparameters
+MUON_LR: 0.0003
+MUON_PI_LR: 0.0003
+MUON_MOMENTUM: 0.95
+MUON_WEIGHT_DECAY: 0.0
+MUON_PI_WEIGHT_DECAY: 0.0
+
+# Auxiliary Adam hyperparameters for non-matrix params in Muon
+MUON_ADAM_LR: 0.0003
+MUON_ADAM_BETA_1: 0.9
+MUON_ADAM_BETA_2: 0.999
+MUON_ADAM_EPS: 0.00001
+MUON_ADAM_WEIGHT_DECAY: 0.0
+MUON_PI_ADAM_LR: 0.0003
+MUON_PI_ADAM_WEIGHT_DECAY: 0.0
 
 CAPACITY: 1000000
 PRIORITIZED: False
@@ -25,11 +51,18 @@ TRAIN_HORIZON: 12
 LAMBDA_W: 0.9
 GRAD_CLIP: 10.0
 
-PI_LR: 0.0003
-
 MPC_SAMPLES: 512
 MPC_ITERS: 3
 MPC_SIGMA: 0.4
 MPC_TEMP: 1.0
 GAMMA: 0.99
 EXPL_NOISE: 0.1
+
+# Epistemic exploration bonus in MPC objective:
+# planning_score = return + beta * epistemic_uncertainty
+USE_EPISTEMIC_EXPLORATION: False
+EPISTEMIC_BONUS_BETA: 0.0
+EPISTEMIC_BONUS_BETA_END: 0.0
+EPISTEMIC_BONUS_DECAY_STEPS: 200000
+EPISTEMIC_METHOD: "ensemble"  # ensemble | q_disagreement | model_disagreement | combined
+EPISTEMIC_NORMALIZE: True
