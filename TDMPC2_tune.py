@@ -376,9 +376,11 @@ def write_best_yaml(
     best_score: float,
     best_config: Dict[str, Any],
     best_experiment_path: str,
+    best_yaml_name: str = "td_best_params.yaml",
 ):
     os.makedirs(base_dir, exist_ok=True)
-    yaml_path = os.path.join(base_dir, "td_best_params.yaml")
+    yaml_path = _resolve_best_yaml_path(base_dir, best_yaml_name)
+    os.makedirs(os.path.dirname(yaml_path) or ".", exist_ok=True)
 
     payload = {
         "best_mavg_rew": float(best_score),
@@ -407,8 +409,13 @@ def write_best_yaml(
     return yaml_path
 
 
-def _read_existing_best_score(base_dir: str) -> float:
-    yaml_path = os.path.join(base_dir, "td_best_params.yaml")
+def _resolve_best_yaml_path(base_dir: str, best_yaml_name: str) -> str:
+    if os.path.isabs(best_yaml_name):
+        return best_yaml_name
+    return os.path.join(base_dir, best_yaml_name)
+
+
+def _read_best_score_from_path(yaml_path: str) -> float:
     if not os.path.exists(yaml_path):
         return float("-inf")
     try:
@@ -425,22 +432,39 @@ def _read_existing_best_score(base_dir: str) -> float:
         return float("-inf")
 
 
+def _read_existing_best_score(
+    base_dir: str,
+    best_yaml_name: str = "td_best_params.yaml",
+) -> float:
+    yaml_path = _resolve_best_yaml_path(base_dir, best_yaml_name)
+    return _read_best_score_from_path(yaml_path)
+
+
 def maybe_update_best_yaml(
     base_dir: str,
     score: float,
     config: Dict[str, Any],
     experiment_path: str,
+    best_yaml_name: str = "td_best_params.yaml",
 ) -> tuple[bool, str | None]:
     os.makedirs(base_dir, exist_ok=True)
-    lock_path = os.path.join(base_dir, "td_best_params.yaml.lock")
+    yaml_path = _resolve_best_yaml_path(base_dir, best_yaml_name)
+    lock_path = f"{yaml_path}.lock"
+    os.makedirs(os.path.dirname(lock_path) or ".", exist_ok=True)
     with open(lock_path, "w") as lock_file:
         if fcntl is not None:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
         try:
-            prev_best = _read_existing_best_score(base_dir)
+            prev_best = _read_existing_best_score(base_dir, best_yaml_name=best_yaml_name)
             if score <= prev_best:
                 return False, None
-            yaml_path = write_best_yaml(base_dir, score, config, experiment_path)
+            yaml_path = write_best_yaml(
+                base_dir,
+                score,
+                config,
+                experiment_path,
+                best_yaml_name=best_yaml_name,
+            )
             return True, yaml_path
         finally:
             if fcntl is not None:
@@ -552,6 +576,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num_parallel_envs", type=int, default=1)
     parser.add_argument("--num_episodes", type=int, default=None)
     parser.add_argument("--training_rounds", type=int, default=1)
+    parser.add_argument(
+        "--best_yaml_name",
+        type=str,
+        default="td_best_params.yaml",
+        help="Filename (or absolute path) for best-params YAML output.",
+    )
     parser.add_argument("--max_runs", type=int, default=None)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument(
@@ -590,14 +620,26 @@ def run_grid_tuning(args: argparse.Namespace) -> int:
             best_score = score
             best_config = run_cfg
             best_experiment_path = exp_path
-            best_yaml_path = write_best_yaml(args.base_dir, best_score, best_config, best_experiment_path)
+            best_yaml_path = write_best_yaml(
+                args.base_dir,
+                best_score,
+                best_config,
+                best_experiment_path,
+                best_yaml_name=args.best_yaml_name,
+            )
 
     if best_config is None:
         print("No successful runs.", file=sys.stderr)
         return 1
 
     if best_yaml_path is None:
-        best_yaml_path = write_best_yaml(args.base_dir, best_score, best_config, best_experiment_path)
+        best_yaml_path = write_best_yaml(
+            args.base_dir,
+            best_score,
+            best_config,
+            best_experiment_path,
+            best_yaml_name=args.best_yaml_name,
+        )
     print(f"Best config saved to: {best_yaml_path}")
     return 0
 
@@ -631,7 +673,13 @@ def run_sweep_once(args: argparse.Namespace) -> int:
         score, exp_path, num_parallel_envs, interrupted = _run_training_once(
             cfg_dict, args, allow_partial_on_interrupt=True
         )
-        updated_best, best_yaml_path = maybe_update_best_yaml(args.base_dir, score, cfg_dict, exp_path)
+        updated_best, best_yaml_path = maybe_update_best_yaml(
+            args.base_dir,
+            score,
+            cfg_dict,
+            exp_path,
+            best_yaml_name=args.best_yaml_name,
+        )
     except Exception as e:
         run.summary["run_error"] = str(e)
         run.summary["run_failed"] = True

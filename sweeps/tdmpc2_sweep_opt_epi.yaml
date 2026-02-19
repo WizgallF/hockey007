@@ -110,6 +110,8 @@ command:
   - Hockey-One-v0
   - --base_dir
   - experiments
+  - --best_yaml_name
+  - td_best_params_muon.yaml
   - --num_episodes
   - "2000"
   - --verbose
