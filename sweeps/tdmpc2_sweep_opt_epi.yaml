@@ -1,0 +1,115 @@
+program: TDMPC2_tune.py
+method: bayes
+metric:
+  name: best_mavg_rew
+  goal: maximize
+parameters:
+  # --- Fixed baseline from previous best run ---
+  BATCH_SIZE:
+    values: [256]
+  EXPL_NOISE:
+    values: [0.1731339945082273]
+  GAMMA:
+    values: [0.9523202673766784]
+  LR:
+    values: [0.0004526813369245856]
+  MPC_ITERS:
+    values: [4]
+  MPC_SAMPLES:
+    values: [256]
+  MPC_SIGMA:
+    values: [0.3568646053811616]
+  MPC_TEMP:
+    values: [1.0881170689746331]
+  TAU:
+    values: [0.03414803795239898]
+  TRAIN_HORIZON:
+    values: [12]
+  num_parallel_envs:
+    values: [1]
+  Q_ENSEMBLE_SIZE:
+    values: [6]
+
+  # --- Optimizer selection (fixed to Muon for this sweep) ---
+  OPTIMIZER:
+    values: ["muon"]
+
+  # --- Muon hyperparameters to tune ---
+  MUON_LR:
+    distribution: log_uniform_values
+    min: 1.0e-05
+    max: 5.0e-03
+  MUON_PI_LR:
+    distribution: log_uniform_values
+    min: 1.0e-05
+    max: 5.0e-03
+  MUON_MOMENTUM:
+    distribution: uniform
+    min: 0.9
+    max: 0.99
+  MUON_WEIGHT_DECAY:
+    distribution: uniform
+    min: 0.0
+    max: 0.001
+  MUON_PI_WEIGHT_DECAY:
+    distribution: uniform
+    min: 0.0
+    max: 0.001
+  MUON_ADAM_LR:
+    distribution: log_uniform_values
+    min: 1.0e-05
+    max: 5.0e-04
+  MUON_ADAM_BETA_1:
+    distribution: uniform
+    min: 0.8
+    max: 0.95
+  MUON_ADAM_BETA_2:
+    distribution: uniform
+    min: 0.95
+    max: 0.999
+  MUON_ADAM_EPS:
+    distribution: log_uniform_values
+    min: 1.0e-08
+    max: 1.0e-05
+  MUON_ADAM_WEIGHT_DECAY:
+    distribution: uniform
+    min: 0.0
+    max: 0.0001
+  MUON_PI_ADAM_LR:
+    distribution: log_uniform_values
+    min: 1.0e-05
+    max: 5.0e-04
+  MUON_PI_ADAM_WEIGHT_DECAY:
+    distribution: uniform
+    min: 0.0
+    max: 0.0001
+
+  # --- Epistemic hyperparameters to tune ---
+  USE_EPISTEMIC_EXPLORATION:
+    values: [true]
+  EPISTEMIC_METHOD:
+    values: ["ensemble", "combined", "model_disagreement", "q_disagreement"]
+  EPISTEMIC_BONUS_BETA:
+    distribution: uniform
+    min: 0.0
+    max: 2.0
+  EPISTEMIC_BONUS_BETA_END:
+    values: [0.0]
+  EPISTEMIC_BONUS_DECAY_STEPS:
+    values: [100000, 200000, 400000]
+  EPISTEMIC_NORMALIZE:
+    values: [true, false]
+
+run_cap: 300
+command:
+  - ${env}
+  - python3
+  - ${program}
+  - --sweep
+  - --env
+  - Hockey-One-v0
+  - --base_dir
+  - experiments
+  - --num_episodes
+  - "2000"
+  - --verbose
