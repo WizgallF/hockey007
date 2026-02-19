@@ -57,21 +57,32 @@ class RewardModel(nn.Module):
 
 
 class QModel(nn.Module):
-    """(z, a) -> (q1, q2) double Q for TD-MPC2-style training."""
-    def __init__(self, z_dim, act_dim, hidden=256):
+    """(z, a) -> ensemble of Q-values."""
+    def __init__(self, z_dim, act_dim, hidden=256, ensemble_size: int = 2):
         super().__init__()
-        self.q1 = MLP(z_dim + act_dim, 1, hidden=hidden, depth=2)
-        self.q2 = MLP(z_dim + act_dim, 1, hidden=hidden, depth=2)
+        self.ensemble_size = max(1, int(ensemble_size))
+        self.qs = nn.ModuleList(
+            [MLP(z_dim + act_dim, 1, hidden=hidden, depth=2) for _ in range(self.ensemble_size)]
+        )
+
+    def all(self, z, a):
+        x = torch.cat([z, a], dim=-1)
+        qs = [q(x).squeeze(-1) for q in self.qs]
+        return torch.stack(qs, dim=0)  # [E, B]
 
     def forward(self, z, a):
-        x = torch.cat([z, a], dim=-1)
-        q1 = self.q1(x).squeeze(-1)
-        q2 = self.q2(x).squeeze(-1)
+        q_all = self.all(z, a)
+        q1 = q_all[0]
+        q2 = q_all[1] if self.ensemble_size > 1 else q_all[0]
         return q1, q2
 
     def min(self, z, a):
-        q1, q2 = self.forward(z, a)
-        return torch.min(q1, q2)
+        q_all = self.all(z, a)
+        return q_all.min(dim=0).values
+
+    def variance(self, z, a):
+        q_all = self.all(z, a)
+        return q_all.var(dim=0, unbiased=False)
 
 
 class PolicyPrior(nn.Module):
@@ -93,7 +104,14 @@ class TDMPC2(nn.Module):
       q_hat  = q(z, a)
       a0     = pi(z)   (policy prior for MPC)
     """
-    def __init__(self, obs_dim: int, act_dim: int, z_dim: int = 256, hidden: int = 512):
+    def __init__(
+        self,
+        obs_dim: int,
+        act_dim: int,
+        z_dim: int = 256,
+        hidden: int = 512,
+        q_ensemble_size: int = 2,
+    ):
         super().__init__()
         self.obs_dim = obs_dim
         self.act_dim = act_dim
@@ -102,7 +120,7 @@ class TDMPC2(nn.Module):
         self.encoder = Encoder(obs_dim, z_dim, hidden=hidden)
         self.dynamics = DynamicsModel(z_dim, act_dim, hidden=hidden)
         self.reward = RewardModel(z_dim, act_dim, hidden=hidden)
-        self.q = QModel(z_dim, act_dim, hidden=hidden)
+        self.q = QModel(z_dim, act_dim, hidden=hidden, ensemble_size=q_ensemble_size)
         self.pi = PolicyPrior(z_dim, act_dim, hidden=hidden)
 
     def encode(self, obs) -> LatentState:
