@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 import importlib
+import inspect
 import numpy as np
 import torch
 import torch.nn as nn
@@ -162,13 +163,30 @@ class TDMPC2Agent(Agent):
         self._a_mean = torch.zeros(self.horizon, self.act_dim, device=self.device)
 
         self.MODEL_IDENTIFIER = getattr(self, "MODEL_IDENTIFIER", "TD-MPC2-Agent")
-        self.model = TDMPC2(
-            obs_dim=self.obs_dim,
-            act_dim=self.act_dim,
-            z_dim=self.Z_DIM,
-            hidden=self.HIDDEN_DIM,
-            q_ensemble_size=self.Q_ENSEMBLE_SIZE,
-        )
+        tdmpc2_sig = inspect.signature(TDMPC2.__init__)
+        supports_q_ensemble_size = "q_ensemble_size" in tdmpc2_sig.parameters
+        if supports_q_ensemble_size:
+            self.model = TDMPC2(
+                obs_dim=self.obs_dim,
+                act_dim=self.act_dim,
+                z_dim=self.Z_DIM,
+                hidden=self.HIDDEN_DIM,
+                q_ensemble_size=self.Q_ENSEMBLE_SIZE,
+            )
+        else:
+            if self.Q_ENSEMBLE_SIZE != 2:
+                raise RuntimeError(
+                    "Your TD_MPC2_backbone.TDMPC2 does not support `q_ensemble_size`, "
+                    f"but Q_ENSEMBLE_SIZE={self.Q_ENSEMBLE_SIZE} was requested. "
+                    "Update `agents/networks/TD_MPC2_backbone.py` on the cluster to the "
+                    "new ensemble-capable version."
+                )
+            self.model = TDMPC2(
+                obs_dim=self.obs_dim,
+                act_dim=self.act_dim,
+                z_dim=self.Z_DIM,
+                hidden=self.HIDDEN_DIM,
+            )
         self.model.to(self.device)
 
         # Target nets for TD targets (only need Q + pi, but easiest is copy whole model and use only parts)
@@ -213,6 +231,15 @@ class TDMPC2Agent(Agent):
             return action
         norm = 2.0 * (action - self._action_low) / (self._action_high - self._action_low + 1e-8) - 1.0
         return np.clip(norm, -1.0, 1.0)
+
+    def _q_all(self, q_module, z: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
+        if hasattr(q_module, "all"):
+            return q_module.all(z, a)
+        q1, q2 = q_module(z, a)
+        return torch.stack([q1, q2], dim=0)
+
+    def _q_ensemble_size(self, q_module) -> int:
+        return int(getattr(q_module, "ensemble_size", 2))
 
     def _resolve_muon_optimizer_cls(self):
         candidates = (
@@ -370,10 +397,11 @@ class TDMPC2Agent(Agent):
             # 1) per-head Q predictions along the rollout
             # 2) discounted mean across horizon for each head
             # 3) variance across heads -> one scalar uncertainty per trajectory
-            q_all = self.model.q.all(
+            q_all = self._q_all(
+                self.model.q,
                 zs[:, :-1, :].reshape(N * H, -1),
                 a_seq.reshape(N * H, -1),
-            ).view(int(self.model.q.ensemble_size), N, H)  # [E,N,H]
+            ).view(self._q_ensemble_size(self.model.q), N, H)  # [E,N,H]
             disc = discounts.view(1, 1, H)
             disc_w = disc / (disc.sum(dim=-1, keepdim=True) + 1e-8)
             q_head_mean = (q_all * disc_w).sum(dim=-1)  # [E,N]
@@ -580,8 +608,9 @@ class TDMPC2Agent(Agent):
         rew_loss_t = F.mse_loss(r_hat, rew, reduction="none")  # [B,H]
 
         # ---- Q prediction (ensemble) ----
-        n_q = int(self.model.q.ensemble_size)
-        q_all = self.model.q.all(
+        n_q = self._q_ensemble_size(self.model.q)
+        q_all = self._q_all(
+            self.model.q,
             z.reshape(B * H, -1),
             act.reshape(B * H, -1),
         ).view(n_q, B, H)
