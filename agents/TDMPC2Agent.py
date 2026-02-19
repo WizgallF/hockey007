@@ -366,11 +366,18 @@ class TDMPC2Agent(Agent):
             terms.append(q_unc)
 
         if use_ens:
-            q_var = self.model.q.variance(
+            # Ensemble epistemic as variance of model-wise trajectory means:
+            # 1) per-head Q predictions along the rollout
+            # 2) discounted mean across horizon for each head
+            # 3) variance across heads -> one scalar uncertainty per trajectory
+            q_all = self.model.q.all(
                 zs[:, :-1, :].reshape(N * H, -1),
                 a_seq.reshape(N * H, -1),
-            ).view(N, H)
-            ens_unc = (q_var * discounts).sum(dim=1)
+            ).view(int(self.model.q.ensemble_size), N, H)  # [E,N,H]
+            disc = discounts.view(1, 1, H)
+            disc_w = disc / (disc.sum(dim=-1, keepdim=True) + 1e-8)
+            q_head_mean = (q_all * disc_w).sum(dim=-1)  # [E,N]
+            ens_unc = q_head_mean.var(dim=0, unbiased=False)  # [N]
             terms.append(ens_unc)
 
         if use_model:
