@@ -429,9 +429,20 @@ class TDMPC2Agent(Agent):
         return torch.stack(terms, dim=0).mean(dim=0)
 
     @torch.no_grad()
-    def act(self, env, state, episode_i, statistics) -> np.ndarray:
+    def act(
+        self,
+        env=None,
+        state=None,
+        episode_i: int | None = None,
+        statistics: dict[str, list] | None = None,
+        greedy: bool = False,
+    ) -> np.ndarray:
         # --- 0) prep tensors ---
         self.model.eval()
+        if state is None:
+            if env is None:
+                raise ValueError("TDMPC2Agent.act requires either `state` or `env` as state input.")
+            state = env
         obs = torch.as_tensor(state, dtype=torch.float32, device=self.device).view(1, -1)
 
         # --- 1) encode ---
@@ -505,7 +516,7 @@ class TDMPC2Agent(Agent):
         a = mean[0]  # [-1,1] range
 
         # --- 4) exploration noise on executed action (optional) ---
-        if self.EXPL_NOISE > 0 and self.model.training is False:
+        if self.EXPL_NOISE > 0 and self.model.training is False and not greedy:
             # use a simple schedule if you want: decay with episode_i or self.t
             a = torch.clamp(a + self.EXPL_NOISE * torch.randn_like(a), -1.0, 1.0)
 
