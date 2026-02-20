@@ -184,6 +184,5 @@ def discrete_to_continuous(discrete_action):
 
 if __name__ == "__main__":
     evaluate_agents(
-          population_path="/home/stud217/hockey007/evaluation/eval_agent_pool",
-          num_episodes=2
+          population_path="/home/stud217/hockey007/evaluation/eval_agent_pool"
     )
