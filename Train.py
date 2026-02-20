@@ -321,7 +321,6 @@ class Training():
                     discrete_actions,
                     i_training_round,
                     start,
-                    population_path,
                 )
                 if self.verbose:
                     self._log_parallel_round_summary(i_training_round, parallel_round_stats)
@@ -332,7 +331,7 @@ class Training():
                     self.env = Envwrapper(self.original_env, self.opponent, discrete_actions)
                     if self.verbose:
                         print(f"[SelfPlay][Round {i_training_round + 1}] mode=warmup_strong_opponent")
-                    self._run_self_play_single_round(i_training_round, start, population_path)
+                    self._run_self_play_single_round(i_training_round, start)
                 else:
                     self.select_from_population(population_path)
                     self.env = Envwrapper(self.original_env, self.opponent, discrete_actions)
@@ -341,7 +340,7 @@ class Training():
                             f"[SelfPlay][Round {i_training_round + 1}] mode=single_opponent "
                             f"| selected={self.last_selected_opponent_info}"
                         )
-                    self._run_self_play_single_round(i_training_round, start, population_path)
+                    self._run_self_play_single_round(i_training_round, start)
 
             winrate_vs_best = self.agent_against_agent_eval(self.agent, self.best_opponent)
             if self.verbose:
@@ -373,10 +372,8 @@ class Training():
     def _run_self_play_single_round(
             self,
             i_training_round,
-            start,
-            population_path):
+            start):
         
-        next_eval_episode = 100
         for i_episode in range(self.agent.NUM_EPISODES):
             self.agent.cur_episode = i_episode
 
@@ -418,15 +415,28 @@ class Training():
                 mv_avg_reward = np.mean(self.statistics["ep_rew"][-self.mavg_window_size:-1])
                 self.statistics["mv_avg_rew"].append(mv_avg_reward)
 
-            completed_episodes = i_episode + 1
-            while completed_episodes >= next_eval_episode:
-                self._run_self_play_periodic_eval(
-                    i_training_round=i_training_round,
-                    completed_episodes=next_eval_episode,
-                    population_path=population_path,
-                    num_eval_games=50,
+                
+
+            # ------ print to console -----
+            if self.verbose and (i_episode == 0 or (i_episode + 1) % 100 == 0):
+                end = time.time()
+                print(
+                    f"[SelfPlay][Round {i_training_round + 1}] "
+                    f"episode={i_episode + 1}/{self.agent.NUM_EPISODES} "
+                    f"| elapsed={end - start:.1f}s | {self._latest_self_play_stats()}"
                 )
-                next_eval_episode += 100
+
+            if i_episode % 1000 == 0:
+                agent_basic_eval = self.agent_against_basicopp_eval(self.agent)
+                agent_strong_eval = self.agent_against_basicopp_eval(self.agent, weak=False)
+                self.agent_against_basic_opp.append(agent_basic_eval)
+                self.agent_against_strong_opp.append(agent_strong_eval)
+                if self.verbose:
+                    print(
+                        f"[SelfPlay][Round {i_training_round + 1}] "
+                        f"weak_basicopp_eval@episode={i_episode} | winrate={agent_basic_eval:.3f} "
+                        f"strong_basicopp_eval@episode={i_episode} | winrate={agent_strong_eval:.3f}"
+                    )
     
     def _load_population_opponents(
             self,
@@ -607,62 +617,6 @@ class Training():
             schedule.append(self._clone_opponent_descriptor(descriptor))
         return schedule
 
-    def _build_periodic_eval_opponents(self, population_path: str):
-        active_pool_path, pool_source = self._active_parallel_pool_path(population_path)
-        opponents = [
-            self._make_basic_opponent_descriptor(weak=True),
-            self._make_basic_opponent_descriptor(weak=False),
-        ]
-        opponents.extend(self._load_population_pool(active_pool_path, source=pool_source))
-        return opponents
-
-    def _run_self_play_periodic_eval(
-            self,
-            i_training_round: int,
-            completed_episodes: int,
-            population_path: str,
-            num_eval_games: int = 50):
-        eval_opponents = self._build_periodic_eval_opponents(population_path)
-        eval_rows = []
-
-        for descriptor in eval_opponents:
-            opponent_id = descriptor["id"]
-            if opponent_id == "basic_weak":
-                winrate = self.agent_against_basicopp_eval(self.agent, weak=True, num_episodes=num_eval_games)
-                self.agent_against_basic_opp.append(winrate)
-            elif opponent_id == "basic_strong":
-                winrate = self.agent_against_basicopp_eval(self.agent, weak=False, num_episodes=num_eval_games)
-                self.agent_against_strong_opp.append(winrate)
-            else:
-                winrate = self.agent_against_agent_eval(
-                    self.agent,
-                    descriptor["agent"],
-                    num_episodes=num_eval_games,
-                )
-
-            eval_rows.append(
-                {
-                    "id": opponent_id,
-                    "kind": descriptor["kind"],
-                    "source": descriptor["source"],
-                    "winrate": float(winrate),
-                }
-            )
-
-        if not self.verbose:
-            return
-
-        print(
-            f"[SelfPlay][Round {i_training_round + 1}] "
-            f"periodic_eval@completed_episode={completed_episodes} "
-            f"| games_per_opponent={num_eval_games} | opponents={len(eval_rows)}"
-        )
-        print("  opponent_id                     kind         source         learner_winrate")
-        for row in eval_rows:
-            print(
-                f"  {row['id']:<30} {row['kind']:<12} {row['source']:<14} {row['winrate']:.3f}"
-            )
-
     def _format_parallel_composition(self, schedule):
         if not schedule:
             return "composition=none"
@@ -722,15 +676,15 @@ class Training():
             schedule,
             discrete_actions,
             i_training_round,
-            start,
-            population_path):
+            start):
         envs = [Envwrapper(h_env.HockeyEnv(), player2=descriptor["agent"], discrete_actions=discrete_actions) for descriptor in schedule]
         num_envs = len(envs)
         target_episodes = self.agent.NUM_EPISODES * num_envs
         ep_rew_per_env = np.zeros(num_envs, dtype=np.float32)
         state = np.asarray([env.reset()[0] for env in envs])
         episodes_finished = 0
-        next_eval_episode = 100
+        next_basic_eval_episode = 0
+        last_logged_episode = -1
         env_opponent_ids = [descriptor["id"] for descriptor in schedule]
         env_opponent_kinds = [descriptor["kind"] for descriptor in schedule]
         opponent_stats = {}
@@ -804,14 +758,36 @@ class Training():
                         reset_state, _ = envs[env_idx].reset()
                         state[env_idx] = reset_state
 
-                while episodes_finished >= next_eval_episode:
-                    self._run_self_play_periodic_eval(
-                        i_training_round=i_training_round,
-                        completed_episodes=next_eval_episode,
-                        population_path=population_path,
-                        num_eval_games=50,
+                if not np.any(done):
+                    continue
+
+                while episodes_finished >= next_basic_eval_episode:
+                    eval_episode = next_basic_eval_episode
+                    agent_basic_eval = self.agent_against_basicopp_eval(self.agent)
+                    agent_strong_eval = self.agent_against_basicopp_eval(self.agent, weak=False)
+                    self.agent_against_basic_opp.append(agent_basic_eval)
+                    self.agent_against_strong_opp.append(agent_strong_eval)
+                    if self.verbose:
+                        print(
+                            f"[SelfPlay][Round {i_training_round + 1}] "
+                            f"weak_basicopp_eval@episode={eval_episode} | winrate={agent_basic_eval:.3f} "
+                            f"strong_basicopp_eval@episode={eval_episode} | winrate={agent_strong_eval:.3f}"
+                        )
+                    next_basic_eval_episode += 1000
+
+                if (
+                    self.verbose
+                    and episodes_finished % 100 == 0
+                    and episodes_finished != last_logged_episode
+                ):
+                    end = time.time()
+                    print(
+                        f"[SelfPlay][Round {i_training_round + 1}] "
+                        f"episode={episodes_finished}/{target_episodes} "
+                        f"| parallel_envs={num_envs} | elapsed={end - start:.1f}s "
+                        f"| {self._latest_self_play_stats()} | {self._format_per_opponent_winrates(opponent_stats)}"
                     )
-                    next_eval_episode += 100
+                    last_logged_episode = episodes_finished
         finally:
             for env in envs:
                 env.env.close()
