@@ -259,6 +259,7 @@ class Training():
 
         self.original_env = self.env
         self.opponent = self._copy_agent_without_replay_buffer()
+        print(type(self.opponent))
         self.best_opponent = self._copy_agent_without_replay_buffer()
         self.population_size = 0
         self.MODEL_IDENTIFIER = self.agent.MODEL_IDENTIFIER
@@ -278,6 +279,15 @@ class Training():
 
         # Add random agent to population for self play
         population_path = os.path.join(self.experiment_path, "agent_population")
+
+        # init winrate against fixed opponent pool
+        if self.fixed_opponents:
+            files = [f for f in os.listdir(self.fixed_opponents_path) if os.path.isfile(os.path.join(self.fixed_opponents_path, f)) and f.split(".")[1] == "pth"]
+            N = len(files)
+            self.fixed_opponents_labels = files
+            self.fixed_opponents_labels.extend(["weak opp", "strong opp"])
+            self.last_winrate_vs_pool = np.zeros(shape=(N + 2,))
+            self.all_winrates_vs_pool = []
     
         self.save_to_population(population_path, i_training_round=0)
         
@@ -343,31 +353,51 @@ class Training():
                     self._run_self_play_single_round(i_training_round, start)
 
             winrate_vs_best = self.agent_against_agent_eval(self.agent, self.best_opponent)
-            if self.verbose:
-                print(
-                    f"[SelfPlay][Round {i_training_round + 1}] end "
-                    f"| winrate_vs_best={winrate_vs_best:.3f} | {self._latest_self_play_stats()}"
-                )
 
-            if winrate_vs_best > 0.5:
-                self.best_opponent = self._copy_agent_without_replay_buffer()
-                self.save_to_population(population_path, i_training_round)
+            if not self.fixed_opponents:
+                winrate_vs_best = self.agent_against_agent_eval(self.agent, self.best_opponent)
                 if self.verbose:
                     print(
-                        f"[SelfPlay][Round {i_training_round + 1}] "
-                        f"new_best_saved | population_size={self.population_size}"
+                        f"[SelfPlay][Round {i_training_round + 1}] end "
+                        f"| winrate_vs_best={winrate_vs_best:.3f} | {self._latest_self_play_stats()}"
                     )
+
+                if winrate_vs_best > 0.5:
+                    self.best_opponent = self._copy_agent_without_replay_buffer()
+                    self.save_to_population(population_path, i_training_round)
+                    if self.verbose:
+                        print(
+                            f"[SelfPlay][Round {i_training_round + 1}] "
+                            f"new_best_saved | population_size={self.population_size}"
+                        )
+            else:
+                opponents = self._load_population_opponents(self.fixed_opponents_path)
+
+                winrate_vs_pool = self._agent_against_pool_eval(self.agent, opponents)
+                self.all_winrates_vs_pool.append(winrate_vs_pool)
+
+                if np.sum(winrate_vs_pool - self.last_winrate_vs_pool) > 0:
+                    self.best_opponent = self._copy_agent_without_replay_buffer()
+                    self.save_to_population(population_path, i_training_round)
+                    if self.verbose:
+                        print(
+                            f"[SelfPlay][Round {i_training_round + 1}] "
+                            f"new_best_saved | population_size={self.population_size}"
+                        )
             
             
 
         self.save_data()
         self.save_performance_against_basic_opp()
 
+        if self.fixed_opponents:
+            self.save_performance_against_fixed_pool()
+
         if type(self.agent) == RainbowAgent:
             self.save_q_values()
 
-        
-        eval_results = self.evaluate_agents(population_path)
+        if not self.fixed_opponents:
+            eval_results = self.evaluate_agents(population_path)
         
     def _run_self_play_single_round(
             self,
@@ -827,6 +857,23 @@ class Training():
 
         # TODO: make population path self argument
 
+    def _agent_against_pool_eval(
+        self,
+        player1, 
+        opponents,
+        num_episodes = 50):
+    
+        winrates = []
+        for opponent in opponents:
+            winrate_against_opponent = self.agent_against_agent_eval(player1, opponent)
+            winrates.append(winrate_against_opponent)
+
+        
+        winrates.append(self.agent_against_basicopp_eval(self.agent, weak=True, num_episodes=num_episodes))
+        winrates.append(self.agent_against_basicopp_eval(self.agent, weak=False, num_episodes=num_episodes))
+
+        return np.asarray(winrates)
+
     def agent_against_agent_eval(
             self, 
             player1, 
@@ -1012,7 +1059,23 @@ class Training():
                         self.last_selected_opponent_info = "fallback_weak_basic"
 
 
+    def save_performance_against_fixed_pool(self):
+            self.all_winrates_vs_pool = np.vstack(self.all_winrates_vs_pool)
 
+
+            N = self.all_winrates_vs_pool.shape[1]
+            colors = plt.cm.viridis(np.linspace(0, 1, N))
+
+            for i in range(N):
+                all_winrates_vs_i = self.all_winrates_vs_pool[:, i]
+                plt.plot(all_winrates_vs_i, label=f"{self.fixed_opponents_labels[i]}", color=colors[i], linewidth=1.5)
+            
+            plt.xlabel("Evaluation intervalls")
+            plt.ylabel("Average Agent Winrate vs Opponents")
+            plt.title("Performance against Fixed Opponent pool")
+            plt.legend()
+            plt.savefig(os.path.join(self.experiment_path, f"opponent_pool_performance-{self.agent.MODEL_IDENTIFIER}.png"), dpi=300)
+            plt.close()
 
 
 
