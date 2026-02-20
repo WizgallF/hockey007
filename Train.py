@@ -317,6 +317,8 @@ class Training():
             # Wrap environment with Player 2
 
             if use_parallel_mode:
+                if not hasattr(self, "best_parallel_pool_avg_winrate"):
+                    self.best_parallel_pool_avg_winrate = float("-inf")
                 schedule = self._build_parallel_opponent_schedule(
                     num_envs=int(num_parallel_envs),
                     population_path=population_path,
@@ -331,6 +333,7 @@ class Training():
                     discrete_actions,
                     i_training_round,
                     start,
+                    population_path,
                 )
                 if self.verbose:
                     self._log_parallel_round_summary(i_training_round, parallel_round_stats)
@@ -706,7 +709,8 @@ class Training():
             schedule,
             discrete_actions,
             i_training_round,
-            start):
+            start,
+            population_path):
         envs = [Envwrapper(h_env.HockeyEnv(), player2=descriptor["agent"], discrete_actions=discrete_actions) for descriptor in schedule]
         num_envs = len(envs)
         target_episodes = self.agent.NUM_EPISODES * num_envs
@@ -797,6 +801,32 @@ class Training():
                     agent_strong_eval = self.agent_against_basicopp_eval(self.agent, weak=False)
                     self.agent_against_basic_opp.append(agent_basic_eval)
                     self.agent_against_strong_opp.append(agent_strong_eval)
+
+                    active_pool_path, _ = self._active_parallel_pool_path(population_path)
+                    pool_opponents = self._load_population_opponents(active_pool_path)
+                    pool_eval_games = 75
+                    pool_eval_winrates = self._agent_against_pool_eval(
+                        self.agent,
+                        pool_opponents,
+                        num_episodes=pool_eval_games,
+                    )
+                    avg_pool_winrate = float(np.mean(pool_eval_winrates)) if len(pool_eval_winrates) > 0 else 0.0
+                    if self.verbose:
+                        print(
+                            f"[SelfPlay][Round {i_training_round + 1}] "
+                            f"pool_avg_eval@episode={eval_episode} "
+                            f"| games_per_opponent={pool_eval_games} "
+                            f"| avg_winrate={avg_pool_winrate:.3f}"
+                        )
+                    if avg_pool_winrate > self.best_parallel_pool_avg_winrate:
+                        self.best_parallel_pool_avg_winrate = avg_pool_winrate
+                        self.agent.save_dict(self.experiment_path)
+                        if self.verbose:
+                            print(
+                                f"[SelfPlay][Round {i_training_round + 1}] "
+                                f"new_best_parallel_pool_avg@episode={eval_episode} "
+                                f"| avg_winrate={avg_pool_winrate:.3f} | model_saved"
+                            )
                     if self.verbose:
                         print(
                             f"[SelfPlay][Round {i_training_round + 1}] "
@@ -865,7 +895,11 @@ class Training():
     
         winrates = []
         for opponent in opponents:
-            winrate_against_opponent = self.agent_against_agent_eval(player1, opponent)
+            winrate_against_opponent = self.agent_against_agent_eval(
+                player1,
+                opponent,
+                num_episodes=num_episodes,
+            )
             winrates.append(winrate_against_opponent)
 
         
