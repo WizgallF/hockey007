@@ -311,6 +311,20 @@ def _run_training_once(
     for key in SWEEP_META_KEYS:
         run_cfg.pop(key, None)
 
+    self_play_population_path: str | None = None
+    if args.self_play_population_path:
+        p = Path(args.self_play_population_path)
+        if not p.is_absolute():
+            p = (Path.cwd() / p).resolve()
+        if not p.exists():
+            raise FileNotFoundError(f"Self-play opponent pool not found: {p}")
+        if not p.is_dir():
+            raise NotADirectoryError(f"Self-play opponent pool is not a directory: {p}")
+        self_play_population_path = str(p)
+        run_cfg["self_play_population_path"] = self_play_population_path
+        # If an external pool is provided, fixed-opponent sampling should be enabled.
+        run_cfg["FIXED_OPPONENTS"] = True
+
     if args.self_play:
         if args.env != "Hockey-One-v0":
             raise RuntimeError("Self-play is currently supported only for Hockey-One-v0.")
@@ -333,7 +347,12 @@ def _run_training_once(
             )
             interrupted = False
             try:
-                trainer.train_self_play(opponent, discrete_actions=False)
+                trainer.train_self_play(
+                    opponent,
+                    discrete_actions=False,
+                    population_path=self_play_population_path,
+                    num_parallel_envs=num_parallel_envs,
+                )
             except KeyboardInterrupt:
                 if not allow_partial_on_interrupt:
                     raise
@@ -343,13 +362,13 @@ def _run_training_once(
             resolved_params = _resolved_params_for_yaml(
                 agent=agent,
                 run_cfg=run_cfg,
-                num_parallel_envs=1,
+                num_parallel_envs=num_parallel_envs,
                 num_episodes=num_episodes,
                 training_rounds=training_rounds,
                 env_name=args.env,
                 self_play=bool(args.self_play),
             )
-            return score, resolved_params, trainer.experiment_path, 1, interrupted
+            return score, resolved_params, trainer.experiment_path, num_parallel_envs, interrupted
         finally:
             env.close()
 
@@ -639,6 +658,12 @@ def parse_args() -> argparse.Namespace:
         "--self_play",
         action="store_true",
         help="Use self-play training (Hockey-One-v0 only).",
+    )
+    parser.add_argument(
+        "--self_play_population_path",
+        type=str,
+        default=None,
+        help="Optional folder with opponent checkpoints (.pth) for fixed-opponent self-play.",
     )
     parser.add_argument(
         "--sweep",
