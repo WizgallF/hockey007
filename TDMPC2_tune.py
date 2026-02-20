@@ -72,6 +72,39 @@ DEFAULT_GRID = {
 SWEEP_META_KEYS = {"num_parallel_envs", "num_episodes", "training_rounds"}
 
 
+def _to_plain(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(k): _to_plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_to_plain(v) for v in value]
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    return value
+
+
+def _resolved_params_for_yaml(
+    agent: Any,
+    run_cfg: Dict[str, Any],
+    num_parallel_envs: int,
+    num_episodes: int | None,
+    training_rounds: int,
+    env_name: str,
+    self_play: bool,
+) -> Dict[str, Any]:
+    # Start from full agent config (config file defaults + sweep overrides),
+    # then layer in any explicit runtime meta-params.
+    params = dict(getattr(agent, "configs", {}) or {})
+    params.update(run_cfg)
+    params["num_parallel_envs"] = int(num_parallel_envs)
+    params["num_episodes"] = int(num_episodes) if num_episodes is not None else int(agent.NUM_EPISODES)
+    params["training_rounds"] = int(training_rounds)
+    params["env"] = str(env_name)
+    params["self_play"] = bool(self_play)
+    return _to_plain(params)
+
+
 def _load_grid_config(path: str) -> Dict[str, Any]:
     with open(path, "r") as f:
         if path.endswith((".yaml", ".yml")):
@@ -307,7 +340,16 @@ def _run_training_once(
                 interrupted = True
 
             score = score_from_stats(trainer.statistics, trainer.mavg_window_size)
-            return score, trainer.experiment_path, 1, interrupted
+            resolved_params = _resolved_params_for_yaml(
+                agent=agent,
+                run_cfg=run_cfg,
+                num_parallel_envs=1,
+                num_episodes=num_episodes,
+                training_rounds=training_rounds,
+                env_name=args.env,
+                self_play=bool(args.self_play),
+            )
+            return score, resolved_params, trainer.experiment_path, 1, interrupted
         finally:
             env.close()
 
@@ -333,7 +375,16 @@ def _run_training_once(
             interrupted = True
 
         score = score_from_stats(trainer.statistics, trainer.mavg_window_size)
-        return score, trainer.experiment_path, num_parallel_envs, interrupted
+        resolved_params = _resolved_params_for_yaml(
+            agent=agent,
+            run_cfg=run_cfg,
+            num_parallel_envs=num_parallel_envs,
+            num_episodes=num_episodes,
+            training_rounds=training_rounds,
+            env_name=args.env,
+            self_play=bool(args.self_play),
+        )
+        return score, resolved_params, trainer.experiment_path, num_parallel_envs, interrupted
     finally:
         env.close()
 
@@ -362,11 +413,11 @@ def run_trial(
     set_seeds(trial_seed)
 
     try:
-        score, exp_path, num_parallel_envs, _ = _run_training_once(cfg_dict, args)
+        score, resolved_params, exp_path, num_parallel_envs, _ = _run_training_once(cfg_dict, args)
         run.summary["best_mavg_rew"] = score
         run.summary["num_parallel_envs"] = int(num_parallel_envs)
         wandb.log({"best_mavg_rew": score})
-        return score, cfg_dict, exp_path
+        return score, resolved_params, exp_path
     finally:
         run.finish()
 
@@ -663,6 +714,7 @@ def run_sweep_once(args: argparse.Namespace) -> int:
     set_seeds(run_seed)
 
     score = float("-inf")
+    resolved_params: Dict[str, Any] = dict(cfg_dict)
     exp_path = ""
     num_parallel_envs = _resolve_num_parallel_envs(cfg_dict, args)
     interrupted = False
@@ -670,13 +722,13 @@ def run_sweep_once(args: argparse.Namespace) -> int:
     best_yaml_path = None
 
     try:
-        score, exp_path, num_parallel_envs, interrupted = _run_training_once(
+        score, resolved_params, exp_path, num_parallel_envs, interrupted = _run_training_once(
             cfg_dict, args, allow_partial_on_interrupt=True
         )
         updated_best, best_yaml_path = maybe_update_best_yaml(
             args.base_dir,
             score,
-            cfg_dict,
+            resolved_params,
             exp_path,
             best_yaml_name=args.best_yaml_name,
         )

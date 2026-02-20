@@ -45,6 +45,15 @@ def _load_best_params(path: str) -> Dict[str, Any]:
     raise RuntimeError(f"Unsupported YAML structure in {path}")
 
 
+def _resolve_existing_path(path_str: str, repo_root: Path, label: str) -> Path:
+    path = Path(path_str)
+    if not path.is_absolute():
+        path = (repo_root / path).resolve()
+    if not path.exists():
+        raise FileNotFoundError(f"{label} not found: {path}")
+    return path
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Retrain TD-MPC2 from best-params YAML")
     parser.add_argument(
@@ -60,6 +69,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--training_rounds", type=int, default=None)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument(
+        "--agent_load_path",
+        type=str,
+        default=None,
+        help="Optional checkpoint path to warm-start retraining from (.pth).",
+    )
+    parser.add_argument(
         "--self_play",
         action="store_true",
         help="Use self-play retraining (Hockey-One-v0 only).",
@@ -74,11 +89,14 @@ def main() -> int:
     repo_root = Path(__file__).resolve().parent.parent
     os.chdir(repo_root)
 
-    best_yaml_path = Path(args.best_yaml)
-    if not best_yaml_path.is_absolute():
-        best_yaml_path = (repo_root / best_yaml_path).resolve()
-    if not best_yaml_path.exists():
-        raise FileNotFoundError(f"Best-params YAML not found: {best_yaml_path}")
+    best_yaml_path = _resolve_existing_path(args.best_yaml, repo_root, "Best-params YAML")
+    agent_load_path = None
+    if args.agent_load_path is not None and str(args.agent_load_path).strip():
+        agent_load_path = _resolve_existing_path(
+            args.agent_load_path,
+            repo_root,
+            "Agent checkpoint",
+        )
 
     cfg_dict = _load_best_params(str(best_yaml_path))
 
@@ -107,6 +125,11 @@ def main() -> int:
         try:
             agent = _build_agent(act_space, obs_space, run_cfg)
             opponent = _build_agent(act_space, obs_space, run_cfg)
+            if agent_load_path is not None:
+                agent.load_dict(str(agent_load_path))
+                opponent.load_dict(str(agent_load_path))
+                if args.verbose:
+                    print(f"Warm-start checkpoint loaded: {agent_load_path}")
             if num_episodes is not None:
                 agent.NUM_EPISODES = int(num_episodes)
                 opponent.NUM_EPISODES = int(num_episodes)
@@ -128,6 +151,10 @@ def main() -> int:
         env, obs_space, act_space = _build_env_bundle(args.env, num_parallel_envs)
         try:
             agent = _build_agent(act_space, obs_space, run_cfg)
+            if agent_load_path is not None:
+                agent.load_dict(str(agent_load_path))
+                if args.verbose:
+                    print(f"Warm-start checkpoint loaded: {agent_load_path}")
             if num_episodes is not None:
                 agent.NUM_EPISODES = int(num_episodes)
 
