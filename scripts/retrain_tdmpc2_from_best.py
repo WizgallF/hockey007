@@ -75,6 +75,12 @@ def parse_args() -> argparse.Namespace:
         help="Optional checkpoint path to warm-start retraining from (.pth).",
     )
     parser.add_argument(
+        "--population_path",
+        type=str,
+        default=None,
+        help="Optional fixed-opponent pool folder for self-play (.pth files).",
+    )
+    parser.add_argument(
         "--self_play",
         action="store_true",
         help="Use self-play retraining (Hockey-One-v0 only).",
@@ -97,8 +103,19 @@ def main() -> int:
             repo_root,
             "Agent checkpoint",
         )
+    population_path = None
+    if args.population_path is not None and str(args.population_path).strip():
+        population_path = _resolve_existing_path(
+            args.population_path,
+            repo_root,
+            "Opponent population folder",
+        )
+        if not population_path.is_dir():
+            raise NotADirectoryError(f"Opponent population folder is not a directory: {population_path}")
 
     cfg_dict = _load_best_params(str(best_yaml_path))
+    if population_path is not None and not bool(cfg_dict.get("FIXED_OPPONENTS", False)):
+        cfg_dict["FIXED_OPPONENTS"] = True
 
     if args.seed is not None:
         cfg_dict["SEED"] = int(args.seed)
@@ -143,7 +160,11 @@ def main() -> int:
                 save_intermediate_agents=False,
                 verbose=args.verbose,
             )
-            trainer.train_self_play(opponent, discrete_actions=False)
+            trainer.train_self_play(
+                opponent,
+                discrete_actions=False,
+                population_path=str(population_path) if population_path is not None else None,
+            )
             score = score_from_stats(trainer.statistics, trainer.mavg_window_size)
         finally:
             env.close()
