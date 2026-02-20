@@ -3,15 +3,19 @@ import torch
 import time
 from agents.AgentBaseclass import Agent 
 from agents.RainbowAgent import RainbowAgent
+from agents.DDPGAgent import DDPGAgent
+from agents.TDMPC2Agent import TDMPC2Agent
 import os
 from datetime import datetime
 import torch.optim as optim
 import matplotlib.pyplot as plt
 from itertools import count
-from Wrapper import Envwrapper
+from Wrapper import Envwrapper, DiscreteActionWrapperHockey
 import hockey.hockey_env as h_env
 from copy import deepcopy
 import random
+import yaml
+from gymnasium import spaces
 
 
 class Training():
@@ -433,16 +437,122 @@ class Training():
     def _load_population_opponents(
             self,
             population_path):
-        
-        opponents = []
-        for agent_index in range(self.population_size):
-            load_path = os.path.join(population_path, self.MODEL_IDENTIFIER + f"_{agent_index}") + ".pth"
-            if os.path.isfile(load_path):
-                pool_agent = self._copy_agent_without_replay_buffer()
+        pool = self._load_population_pool(population_path)
+        return [item["agent"] for item in pool]
+
+    def _population_sort_key(self, fname: str, load_path: str) -> tuple[int, str]:
+        stem = os.path.splitext(fname)[0]
+        suffix = stem.rsplit("_", 1)[-1]
+        if suffix.isdigit():
+            return (0, int(suffix))
+        return (1, os.path.getmtime(load_path))
+
+    def _load_population_pool(
+            self,
+            population_path):
+        pool = []
+        candidate_files = [
+            fname for fname in os.listdir(population_path)
+            if fname.endswith(".pth") and os.path.isfile(os.path.join(population_path, fname))
+        ]
+        if not candidate_files:
+            return pool
+
+        base_env = h_env.HockeyEnv()
+        try:
+            base_obs_space = base_env.observation_space
+            base_act_space = base_env.action_space
+
+            if hasattr(base_obs_space, "shape") and base_obs_space.shape is not None:
+                n_observations = int(base_obs_space.shape[0])
+            else:
+                state, _ = base_env.reset()
+                n_observations = len(state)
+
+            try:
+                proxy_env = DiscreteActionWrapperHockey(base_env)
+                n_actions = int(proxy_env.action_space.n)
+            except Exception:
+                n_actions = 8
+
+            if hasattr(base_act_space, "low") and hasattr(base_act_space, "high"):
+                low = base_act_space.low
+                high = base_act_space.high
+                if getattr(base_act_space, "shape", None) and base_act_space.shape[0] >= 4:
+                    low = low[:4]
+                    high = high[:4]
+                single_player_action_space = spaces.Box(
+                    low=low,
+                    high=high,
+                    dtype=base_act_space.dtype,
+                )
+            else:
+                single_player_action_space = base_act_space
+
+            sorted_files = sorted(
+                candidate_files,
+                key=lambda fname: self._population_sort_key(
+                    fname, os.path.join(population_path, fname)
+                ),
+            )
+
+            for fname in sorted_files:
+                load_path = os.path.join(population_path, fname)
+                config_path = os.path.join(population_path, os.path.splitext(fname)[0] + ".yaml")
+                if not os.path.isfile(config_path):
+                    if self.verbose:
+                        print(f"[SelfPlay] missing config for opponent: {config_path}")
+                    continue
+
+                try:
+                    with open(config_path, "r") as f:
+                        config = yaml.safe_load(f) or {}
+                except Exception as exc:
+                    if self.verbose:
+                        print(f"[SelfPlay] failed to load config {config_path}: {exc}")
+                    continue
+
+                model_id = str(config.get("MODEL_IDENTIFIER", "")).strip().lower()
+                if model_id == "rainbow":
+                    pool_agent = RainbowAgent(
+                        n_observations,
+                        n_actions,
+                        config_path=config_path,
+                    )
+                elif model_id == "ddpg":
+                    pool_agent = DDPGAgent(
+                        base_obs_space,
+                        single_player_action_space,
+                        config_path=config_path,
+                    )
+                elif model_id in {"tdmpc2", "tdmpc"}:
+                    pool_agent = TDMPC2Agent(
+                        single_player_action_space,
+                        base_obs_space,
+                        config_path=config_path,
+                    )
+                else:
+                    if self.verbose:
+                        print(
+                            f"[SelfPlay] unsupported MODEL_IDENTIFIER={model_id} "
+                            f"for opponent config {config_path}"
+                        )
+                    continue
+
                 pool_agent.load_dict(load_path)
-                opponents.append(pool_agent)
-        
-        return opponents
+                pool.append(
+                    {
+                        "agent": pool_agent,
+                        "model_id": model_id,
+                        "path": load_path,
+                        "config_path": config_path,
+                        "filename": fname,
+                    }
+                )
+        finally:
+            base_env.close()
+
+        return pool
     
     def _copy_agent_without_replay_buffer(self):
         detached_attrs = {}
@@ -731,25 +841,23 @@ class Training():
         
         if not self.fixed_opponents:
             p = random.random()
+            pool = self._load_population_pool(population_path)
 
-            if p < 0.2:
+            if p < 0.2 or not pool:
                 self.opponent = h_env.BasicOpponent(weak=False)
                 self.last_selected_opponent_info = "strong_basic_opponent"
+                return
 
-            elif p < 0.5:
-                recent_idx = max(0, self.population_size - 3)
-                agent_index = np.random.randint(recent_idx, self.population_size)
-                load_path = os.path.join(population_path, self.MODEL_IDENTIFIER + f"_{agent_index}") + ".pth"
-                self.opponent = self._copy_agent_without_replay_buffer()
-                self.opponent.load_dict(load_path)
-                self.last_selected_opponent_info = f"recent_pool_agent_{agent_index}"
+            if p < 0.5:
+                recent_pool = pool[-3:] if len(pool) >= 3 else pool
+                chosen = random.choice(recent_pool)
+                self.opponent = chosen["agent"]
+                self.last_selected_opponent_info = f"recent_pool_{chosen['model_id']}_{chosen['filename']}"
+                return
 
-            else:
-                agent_index = np.random.randint(0, self.population_size)
-                load_path = os.path.join(population_path, self.MODEL_IDENTIFIER + f"_{agent_index}") + ".pth"
-                self.opponent = self._copy_agent_without_replay_buffer()
-                self.opponent.load_dict(load_path)
-                self.last_selected_opponent_info = f"random_pool_agent_{agent_index}"
+            chosen = random.choice(pool)
+            self.opponent = chosen["agent"]
+            self.last_selected_opponent_info = f"random_pool_{chosen['model_id']}_{chosen['filename']}"
         
         else:
             p = random.random()
@@ -760,14 +868,11 @@ class Training():
                 self.opponent = h_env.BasicOpponent(weak=True)
                 self.last_selected_opponent_info = "fixed_pool_weak_basic"
             else:
-                files = [f for f in os.listdir(self.fixed_opponents_path) if os.path.isfile(os.path.join(self.fixed_opponents_path, f))]
-                N = len(files)
-                if N != 0:
-                    index = np.random.randint(0, N)
-                    load_path = os.path.join(self.fixed_opponents_path, files[index])
-                    self.opponent = self._copy_agent_without_replay_buffer()
-                    self.opponent.load_dict(load_path)
-                    self.last_selected_opponent_info = f"fixed_pool_file_{files[index]}"
+                pool = self._load_population_pool(self.fixed_opponents_path)
+                if pool:
+                    chosen = random.choice(pool)
+                    self.opponent = chosen["agent"]
+                    self.last_selected_opponent_info = f"fixed_pool_{chosen['model_id']}_{chosen['filename']}"
                 else:
                     p = random.random()
                     if p < 0.5:
