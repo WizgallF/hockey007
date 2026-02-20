@@ -8,6 +8,7 @@ import os
 import hockey.hockey_env as h_env
 import gymnasium as gym
 from Wrapper import DiscreteActionWrapperHockey
+import matplotlib.pyplot as plt
 
 
 def evaluate_agents(
@@ -108,7 +109,7 @@ def evaluate_agents(
                 results[j][i] =  1 - agent_won_proportion
 
         
-        print(results)
+        
 
         average_winrate = dict()
 
@@ -116,7 +117,13 @@ def evaluate_agents(
             i_average_winrate = np.sum(results[i]) / (N-1)
             average_winrate[agents[i]] = float(i_average_winrate)
 
-        print(average_winrate)
+        plt.barh(list(average_winrate.keys()), list(average_winrate.values()))
+        plt.xlabel("Average Winrate")
+        plt.ylabel("Agents")
+        plt.title("Evaluation of Agent pool")
+        plt.tight_layout()
+        plt.savefig(os.path.join(population_path, "evaluation.png"), dpi=300)
+        plt.close()
 
 
 def agent_against_agent_eval(
@@ -178,5 +185,5 @@ def discrete_to_continuous(discrete_action):
 if __name__ == "__main__":
     evaluate_agents(
           population_path="/home/stud217/hockey007/evaluation/eval_agent_pool",
-          num_episodes=1
+          num_episodes=2
     )
