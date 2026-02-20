@@ -55,7 +55,8 @@ def main ():
             save_intermediate_agents=args.int_agents, 
             verbose=args.verbose, 
             agent_load_path=args.playagent1_path,
-            population_path=args.pop_path)
+            population_path=args.pop_path,
+            num_parallel_envs=args.num_parallel_envs)
 
     elif args.play:        
         core.play(

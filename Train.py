@@ -16,6 +16,7 @@ from copy import deepcopy
 import random
 import yaml
 from gymnasium import spaces
+from collections import Counter
 
 
 class Training():
@@ -251,7 +252,8 @@ class Training():
             opponent,
             discrete_actions = False,
             agent_load_path = None,
-            population_path = None):
+            population_path = None,
+            num_parallel_envs: int = 1):
 
         torch.set_default_dtype(torch.float32)
 
@@ -264,6 +266,7 @@ class Training():
         self.fixed_opponents_path = population_path
         training_rounds = int(getattr(self.agent, "TRAINING_ROUNDS", 1))
         k_against_strong = int(getattr(self.agent, "K_AGAINST_STRONG", 0))
+        use_parallel_mode = int(num_parallel_envs) > 1
 
         # print hyperparameter settings to console 
         if self.verbose:
@@ -288,11 +291,13 @@ class Training():
         if self.verbose:
             print(
                 f"[SelfPlay] start | rounds={training_rounds} | episodes_per_round={self.agent.NUM_EPISODES} "
-                f"| fixed_opponents={self.fixed_opponents} | warmup_strong_rounds={k_against_strong}"
+                f"| fixed_opponents={self.fixed_opponents} | warmup_strong_rounds={k_against_strong} "
+                f"| parallel_envs={max(1, int(num_parallel_envs))}"
             )
 
 
         for i_training_round in range(training_rounds):
+            parallel_round_stats = None
             if self.verbose:
                 print(
                     f"\n[SelfPlay][Round {i_training_round + 1}/{training_rounds}] "
@@ -301,33 +306,32 @@ class Training():
 
             # Wrap environment with Player 2
 
-            # Train first two rounds against strong opponent
-            if not self.fixed_opponents and i_training_round < k_against_strong:
-                self.opponent = h_env.BasicOpponent(weak=False)
-                self.env = Envwrapper(self.original_env, self.opponent, discrete_actions)
+            if use_parallel_mode:
+                schedule = self._build_parallel_opponent_schedule(
+                    num_envs=int(num_parallel_envs),
+                    population_path=population_path,
+                )
                 if self.verbose:
-                    print(f"[SelfPlay][Round {i_training_round + 1}] mode=warmup_strong_opponent")
-                self._run_self_play_single_round(i_training_round, start)
+                    print(
+                        f"[SelfPlay][Round {i_training_round + 1}] mode=parallel_pool "
+                        f"| parallel_envs={len(schedule)} | {self._format_parallel_composition(schedule)}"
+                    )
+                parallel_round_stats = self._run_self_play_parallel_round(
+                    schedule,
+                    discrete_actions,
+                    i_training_round,
+                    start,
+                )
+                if self.verbose:
+                    self._log_parallel_round_summary(i_training_round, parallel_round_stats)
             else:
-                use_parallel_population = (not self.fixed_opponents and self.population_size > 1)
-                if use_parallel_population:
-                    opponents = self._load_population_opponents(population_path)
-                    if len(opponents) > 1:
-                        if self.verbose:
-                            print(
-                                f"[SelfPlay][Round {i_training_round + 1}] "
-                                f"mode=parallel_pool | active_opponents={len(opponents)}"
-                            )
-                        self._run_self_play_parallel_round(opponents, discrete_actions, i_training_round, start)
-                    else:
-                        self.select_from_population(population_path)
-                        self.env = Envwrapper(self.original_env, self.opponent, discrete_actions)
-                        if self.verbose:
-                            print(
-                                f"[SelfPlay][Round {i_training_round + 1}] mode=single_opponent "
-                                f"| selected={self.last_selected_opponent_info}"
-                            )
-                        self._run_self_play_single_round(i_training_round, start)
+                # Train first rounds against strong opponent (single-env mode only)
+                if not self.fixed_opponents and i_training_round < k_against_strong:
+                    self.opponent = h_env.BasicOpponent(weak=False)
+                    self.env = Envwrapper(self.original_env, self.opponent, discrete_actions)
+                    if self.verbose:
+                        print(f"[SelfPlay][Round {i_training_round + 1}] mode=warmup_strong_opponent")
+                    self._run_self_play_single_round(i_training_round, start)
                 else:
                     self.select_from_population(population_path)
                     self.env = Envwrapper(self.original_env, self.opponent, discrete_actions)
@@ -430,8 +434,8 @@ class Training():
                 if self.verbose:
                     print(
                         f"[SelfPlay][Round {i_training_round + 1}] "
-                        f"basicopp_eval@episode={i_episode} | winrate={agent_basic_eval:.3f}"
-                        f"basicopp_eval@episode={i_episode} | winrate={agent_strong_eval:.3f}"
+                        f"weak_basicopp_eval@episode={i_episode} | winrate={agent_basic_eval:.3f} "
+                        f"strong_basicopp_eval@episode={i_episode} | winrate={agent_strong_eval:.3f}"
                     )
     
     def _load_population_opponents(
@@ -440,17 +444,32 @@ class Training():
         pool = self._load_population_pool(population_path)
         return [item["agent"] for item in pool]
 
-    def _population_sort_key(self, fname: str, load_path: str) -> tuple[int, str]:
+    def _population_sort_key(self, fname: str) -> tuple[int, int, str]:
         stem = os.path.splitext(fname)[0]
         suffix = stem.rsplit("_", 1)[-1]
         if suffix.isdigit():
-            return (0, int(suffix))
-        return (1, os.path.getmtime(load_path))
+            return (0, int(suffix), fname)
+        return (1, 0, fname)
+
+    def _strip_agent_training_state(self, agent):
+        for attr in ("replay_buffer", "buffer", "action_noise"):
+            if hasattr(agent, attr):
+                setattr(agent, attr, None)
+        return agent
+
+    def _active_parallel_pool_path(self, population_path: str):
+        if self.fixed_opponents:
+            return self.fixed_opponents_path, "fixed_pool"
+        return population_path, "self_play_pool"
 
     def _load_population_pool(
             self,
-            population_path):
+            population_path,
+            source: str = "self_play_pool"):
         pool = []
+        if not population_path or not os.path.isdir(population_path):
+            return pool
+
         candidate_files = [
             fname for fname in os.listdir(population_path)
             if fname.endswith(".pth") and os.path.isfile(os.path.join(population_path, fname))
@@ -491,9 +510,7 @@ class Training():
 
             sorted_files = sorted(
                 candidate_files,
-                key=lambda fname: self._population_sort_key(
-                    fname, os.path.join(population_path, fname)
-                ),
+                key=self._population_sort_key,
             )
 
             for fname in sorted_files:
@@ -540,19 +557,102 @@ class Training():
                     continue
 
                 pool_agent.load_dict(load_path)
+                pool_agent = self._strip_agent_training_state(pool_agent)
                 pool.append(
                     {
+                        "id": f"pool:{fname}",
+                        "kind": model_id,
                         "agent": pool_agent,
                         "model_id": model_id,
                         "path": load_path,
                         "config_path": config_path,
                         "filename": fname,
+                        "source": source,
                     }
                 )
         finally:
             base_env.close()
 
         return pool
+
+    def _make_basic_opponent_descriptor(self, weak: bool):
+        opponent_id = "basic_weak" if weak else "basic_strong"
+        return {
+            "id": opponent_id,
+            "kind": opponent_id,
+            "agent": h_env.BasicOpponent(weak=weak),
+            "source": "builtin_basic",
+            "filename": opponent_id,
+        }
+
+    def _clone_opponent_descriptor(self, descriptor):
+        if descriptor["kind"] in {"basic_weak", "basic_strong"}:
+            return self._make_basic_opponent_descriptor(weak=descriptor["kind"] == "basic_weak")
+
+        cloned = {key: value for key, value in descriptor.items() if key != "agent"}
+        try:
+            cloned["agent"] = deepcopy(descriptor["agent"])
+        except Exception:
+            cloned["agent"] = descriptor["agent"]
+        return cloned
+
+    def _build_parallel_opponent_schedule(
+            self,
+            num_envs: int,
+            population_path: str):
+        if num_envs <= 0:
+            return []
+
+        active_pool_path, pool_source = self._active_parallel_pool_path(population_path)
+        pool = self._load_population_pool(active_pool_path, source=pool_source)
+        base_cycle = [
+            self._make_basic_opponent_descriptor(weak=True),
+            self._make_basic_opponent_descriptor(weak=False),
+        ]
+        base_cycle.extend(pool)
+
+        schedule = []
+        for env_idx in range(num_envs):
+            descriptor = base_cycle[env_idx % len(base_cycle)]
+            schedule.append(self._clone_opponent_descriptor(descriptor))
+        return schedule
+
+    def _format_parallel_composition(self, schedule):
+        if not schedule:
+            return "composition=none"
+
+        id_counts = Counter(descriptor["id"] for descriptor in schedule)
+        kind_counts = Counter(descriptor["kind"] for descriptor in schedule)
+        id_part = ", ".join(f"{opponent_id}={id_counts[opponent_id]}" for opponent_id in sorted(id_counts.keys()))
+        kind_part = ", ".join(f"{kind}={kind_counts[kind]}" for kind in sorted(kind_counts.keys()))
+        return f"composition_by_id: {id_part} | composition_by_kind: {kind_part}"
+
+    def _format_per_opponent_winrates(self, opponent_stats):
+        if not opponent_stats:
+            return "per_opp_winrate=none"
+
+        parts = []
+        for opponent_id in sorted(opponent_stats.keys()):
+            stats = opponent_stats[opponent_id]
+            decisive_games = int(stats["wins"]) + int(stats["losses"])
+            winrate = (int(stats["wins"]) / decisive_games) if decisive_games > 0 else 0.0
+            parts.append(f"{opponent_id}={winrate:.3f}({int(stats['games'])})")
+        return "per_opp_winrate: " + ", ".join(parts)
+
+    def _log_parallel_round_summary(self, i_training_round, opponent_stats):
+        if not opponent_stats:
+            return
+
+        print(f"[SelfPlay][Round {i_training_round + 1}] per-opponent summary")
+        for opponent_id in sorted(opponent_stats.keys()):
+            stats = opponent_stats[opponent_id]
+            decisive_games = int(stats["wins"]) + int(stats["losses"])
+            winrate = (int(stats["wins"]) / decisive_games) if decisive_games > 0 else 0.0
+            print(
+                f"  - {opponent_id} | kind={stats['kind']} | games={int(stats['games'])} "
+                f"| W/L/D={int(stats['wins'])}/{int(stats['losses'])}/{int(stats['draws'])} "
+                f"| winrate={winrate:.3f}"
+            )
     
     def _copy_agent_without_replay_buffer(self):
         detached_attrs = {}
@@ -573,21 +673,33 @@ class Training():
     
     def _run_self_play_parallel_round(
             self,
-            opponents,
+            schedule,
             discrete_actions,
             i_training_round,
             start):
-        
-        envs = [Envwrapper(h_env.HockeyEnv(), player2=opponent, discrete_actions=discrete_actions) for opponent in opponents]
+        envs = [Envwrapper(h_env.HockeyEnv(), player2=descriptor["agent"], discrete_actions=discrete_actions) for descriptor in schedule]
         num_envs = len(envs)
+        target_episodes = self.agent.NUM_EPISODES * num_envs
         ep_rew_per_env = np.zeros(num_envs, dtype=np.float32)
         state = np.asarray([env.reset()[0] for env in envs])
         episodes_finished = 0
-        next_basic_eval_episode = 1
+        next_basic_eval_episode = 0
         last_logged_episode = -1
+        env_opponent_ids = [descriptor["id"] for descriptor in schedule]
+        env_opponent_kinds = [descriptor["kind"] for descriptor in schedule]
+        opponent_stats = {}
+        for opponent_id, opponent_kind in zip(env_opponent_ids, env_opponent_kinds):
+            if opponent_id not in opponent_stats:
+                opponent_stats[opponent_id] = {
+                    "kind": opponent_kind,
+                    "games": 0,
+                    "wins": 0,
+                    "losses": 0,
+                    "draws": 0,
+                }
 
         try:
-            while episodes_finished < self.agent.NUM_EPISODES:
+            while episodes_finished < target_episodes:
                 self.agent.cur_episode = episodes_finished
                 action = np.asarray(
                     [
@@ -599,12 +711,14 @@ class Training():
                 next_state = []
                 reward = np.zeros(num_envs, dtype=np.float32)
                 done = np.zeros(num_envs, dtype=bool)
+                infos = [None for _ in range(num_envs)]
 
                 for env_idx, env in enumerate(envs):
-                    obs, rew, terminated, truncated, _ = env.step(action[env_idx])
+                    obs, rew, terminated, truncated, info = env.step(action[env_idx])
                     next_state.append(obs)
                     reward[env_idx] = float(rew)
                     done[env_idx] = bool(terminated or truncated)
+                    infos[env_idx] = info
                     self.agent.observe(
                         state[env_idx],
                         action[env_idx],
@@ -624,17 +738,28 @@ class Training():
                     for env_idx in done_indices:
                         self.statistics["ep_rew"].append(float(ep_rew_per_env[env_idx]))
                         ep_rew_per_env[env_idx] = 0.0
+                        episodes_finished += 1
+
+                        opponent_id = env_opponent_ids[env_idx]
+                        stats = opponent_stats[opponent_id]
+                        stats["games"] += 1
+                        winner = infos[env_idx].get("winner") if infos[env_idx] is not None else None
+                        if winner == 1:
+                            stats["wins"] += 1
+                        elif winner == -1:
+                            stats["losses"] += 1
+                        else:
+                            stats["draws"] += 1
+
+                        if len(self.statistics["ep_rew"]) > self.mavg_window_size + 1:
+                            mv_avg_reward = np.mean(self.statistics["ep_rew"][-self.mavg_window_size:-1])
+                            self.statistics["mv_avg_rew"].append(mv_avg_reward)
+
                         reset_state, _ = envs[env_idx].reset()
                         state[env_idx] = reset_state
 
-                prev_episodes_finished = episodes_finished
-                episodes_finished = len(self.statistics["ep_rew"]) - 1
-                if episodes_finished == prev_episodes_finished:
+                if not np.any(done):
                     continue
-
-                if len(self.statistics["ep_rew"]) > self.mavg_window_size + 1:
-                    mv_avg_reward = np.mean(self.statistics["ep_rew"][-self.mavg_window_size:-1])
-                    self.statistics["mv_avg_rew"].append(mv_avg_reward)
 
                 while episodes_finished >= next_basic_eval_episode:
                     eval_episode = next_basic_eval_episode
@@ -645,8 +770,8 @@ class Training():
                     if self.verbose:
                         print(
                             f"[SelfPlay][Round {i_training_round + 1}] "
-                            f"basicopp_eval@episode={eval_episode} | winrate={agent_basic_eval:.3f}"
-                            f"basicopp_eval@episode={eval_episode} | winrate={agent_strong_eval:.3f}"
+                            f"weak_basicopp_eval@episode={eval_episode} | winrate={agent_basic_eval:.3f} "
+                            f"strong_basicopp_eval@episode={eval_episode} | winrate={agent_strong_eval:.3f}"
                         )
                     next_basic_eval_episode += 1000
 
@@ -658,14 +783,16 @@ class Training():
                     end = time.time()
                     print(
                         f"[SelfPlay][Round {i_training_round + 1}] "
-                        f"episode={episodes_finished}/{self.agent.NUM_EPISODES} "
+                        f"episode={episodes_finished}/{target_episodes} "
                         f"| parallel_envs={num_envs} | elapsed={end - start:.1f}s "
-                        f"| {self._latest_self_play_stats()}"
+                        f"| {self._latest_self_play_stats()} | {self._format_per_opponent_winrates(opponent_stats)}"
                     )
                     last_logged_episode = episodes_finished
         finally:
             for env in envs:
                 env.env.close()
+
+        return opponent_stats
 
 
     def evaluate_agents(
@@ -781,7 +908,9 @@ class Training():
         if len(self.statistics["mv_avg_rew"]) > 0:
             parts.append(f"mv_avg_reward={self.statistics['mv_avg_rew'][-1]:.3f}")
         if len(self.agent_against_basic_opp) > 0:
-            parts.append(f"basicopp_winrate={self.agent_against_basic_opp[-1]:.3f}")
+            parts.append(f"weak_basicopp_winrate={self.agent_against_basic_opp[-1]:.3f}")
+        if len(self.agent_against_strong_opp) > 0:
+            parts.append(f"strong_basicopp_winrate={self.agent_against_strong_opp[-1]:.3f}")
         if len(self.statistics["tr_loss"]) > 0:
             parts.append(f"last_loss={self.statistics['tr_loss'][-1]:.4f}")
         return " | ".join(parts)
@@ -841,7 +970,7 @@ class Training():
         
         if not self.fixed_opponents:
             p = random.random()
-            pool = self._load_population_pool(population_path)
+            pool = self._load_population_pool(population_path, source="self_play_pool")
 
             if p < 0.2 or not pool:
                 self.opponent = h_env.BasicOpponent(weak=False)
@@ -868,7 +997,7 @@ class Training():
                 self.opponent = h_env.BasicOpponent(weak=True)
                 self.last_selected_opponent_info = "fixed_pool_weak_basic"
             else:
-                pool = self._load_population_pool(self.fixed_opponents_path)
+                pool = self._load_population_pool(self.fixed_opponents_path, source="fixed_pool")
                 if pool:
                     chosen = random.choice(pool)
                     self.opponent = chosen["agent"]

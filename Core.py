@@ -105,7 +105,8 @@ class Core:
             verbose=False,
             agent_load_path = None,
             population_path = None,
-            bins = 5):
+            bins = 5,
+            num_parallel_envs: int = 1):
         
         print(agent_name)
             
@@ -159,7 +160,8 @@ class Core:
             opponent=agent, 
             discrete_actions=discrete_actions, 
             agent_load_path=agent_load_path,
-            population_path=population_path)
+            population_path=population_path,
+            num_parallel_envs=num_parallel_envs)
 
     def agent_against_human(self):
         pass
