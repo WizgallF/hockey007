@@ -15,6 +15,7 @@ def main ():
 
     parser.add_argument ( '--train', default=False, action="store_true", help="Train an agent in a specified environment" )
     parser.add_argument ( '--train_self_play', default=False, action="store_true", help="Train an agent in a specified environment to play against past versions of itself" )
+    parser.add_argument ( '--exploit', default=False, action="store_true", help="Exploit a specific agent by copying it and training against it" )
     parser.add_argument ( '--play', default=False, action="store_true", help="Let an agent play against the basic opponent" )
     parser.add_argument ( '--agent', type=str, default="rainbow", help = "Specify the agent to use for training/evaluation")
     parser.add_argument ( '--num_parallel_envs', type=int, default=1, help = "Number of parallel environments to use during training")
@@ -67,6 +68,17 @@ def main ():
             agent1_config=args.playagent1_config, 
             agent2_path=args.playagent2_path, 
             agent2_config=args.playagent2_config)
+            
+    elif args.exploit:
+        core.exploit_agent(
+            agent_name=args.agent, 
+            env_name=args.env, 
+            base_dir=args.base_dir, 
+            save_intermediate_agents=args.int_agents, 
+            verbose=args.verbose, 
+            agent_load_path=args.playagent1_path,
+            population_path=args.pop_path,
+            num_parallel_envs=args.num_parallel_envs)
 
 
 

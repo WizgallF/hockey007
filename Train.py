@@ -401,6 +401,7 @@ class Training():
 
         if not self.fixed_opponents:
             eval_results = self.evaluate_agents(population_path)
+    
         
     def _run_self_play_single_round(
             self,
@@ -1114,5 +1115,144 @@ class Training():
 
 
 
-    def save(self, *args, **kwargs):
-        pass
+    def exploit_agent(
+            self, 
+            opponent,
+            discrete_actions = False,
+            agent_load_path = None,
+            population_path = None,
+            num_parallel_envs: int = 1):
+
+        torch.set_default_dtype(torch.float32)
+
+        self.original_env = self.env
+        self.opponent = self._copy_agent_without_replay_buffer()
+        self.population_size = 0
+        self.MODEL_IDENTIFIER = self.agent.MODEL_IDENTIFIER
+        use_parallel_mode = int(num_parallel_envs) > 1
+
+        # print hyperparameter settings to console 
+        if self.verbose:
+            self.agent.print_config()
+
+        # Create experiment folder and save config
+        self.experiment_path = self.agent.save_experiment_config(self.base_dir)
+
+
+        start = time.time()
+        best_mv_avg_reward = float('-inf')
+        self.winrate_vs_opponent = None
+        self.all_winrates_vs_opponent = []
+
+
+        parallel_round_stats = None
+        
+
+        # Wrap environment with Player 2
+
+        if use_parallel_mode:
+            pass
+            """if not hasattr(self, "best_parallel_pool_avg_winrate"):
+                self.best_parallel_pool_avg_winrate = float("-inf")
+            schedule = self._build_parallel_opponent_schedule(
+                num_envs=int(num_parallel_envs),
+                population_path=population_path,
+            )
+            if self.verbose:
+                print(
+                    f"[SelfPlay][Round {i_training_round + 1}] mode=parallel_pool "
+                    f"| parallel_envs={len(schedule)} | {self._format_parallel_composition(schedule)}"
+                )
+            parallel_round_stats = self._run_self_play_parallel_round(
+                schedule,
+                discrete_actions,
+                i_training_round,
+                start,
+                population_path,
+            )
+            if self.verbose:
+                self._log_parallel_round_summary(i_training_round, parallel_round_stats)
+
+"""
+        else:
+            
+            self.env = Envwrapper(self.original_env, self.opponent, discrete_actions)
+            
+            for i_episode in range(self.agent.NUM_EPISODES):
+                self.agent.cur_episode = i_episode
+
+                # --------- init environment -----------
+                state, info = self.env.reset()
+                
+                for t in count():
+
+                    # ------ act ------
+                    action = self.agent.act(self.env, state, i_episode, self.statistics)
+                    next_state, reward, terminated, truncated, _ = self.env.step(action)
+
+
+                    # ------ observe ------
+                    self.agent.observe(state, action, reward, next_state, terminated)
+                    self.statistics["ep_rew"][-1] += float(reward) 
+                    
+
+                    # ------ move to next state ------
+                    state = next_state
+
+
+                    # ------ update ------
+                    if i_episode >= self.agent.START_TRAINING:
+                        self.agent.update(self.statistics)
+
+                    # ------ terminate episode ------
+                    done = terminated or truncated
+                    if done:
+                        self.statistics["ep_rew"].append(0)
+                        break
+            
+
+
+                
+                # ------ add to statistic------
+                n = len(self.statistics["ep_rew"]) 
+                if n > self.mavg_window_size + 1:
+                    mv_avg_reward = np.mean(self.statistics["ep_rew"][-self.mavg_window_size:-1])
+                    self.statistics["mv_avg_rew"].append(mv_avg_reward)
+
+                    
+
+                
+                if i_episode >= self.agent.START_TRAINING and i_episode % 100 == 0:
+                    self.winrate_vs_opponent = self.agent_against_agent_eval(self.agent, self.opponent)
+                    self.all_winrates_vs_opponent.append(self.winrate_vs_opponent)
+
+                    if self.winrate_vs_opponent > 0.9:
+                        self.agent.save_dict(self.experiment_path)
+                        break
+
+
+                    end = time.time()
+                    print(
+                            f"[Exploitation][Episode {i_episode}] "
+                            f"| elapsed={end - start:.1f}s "
+                            f"| winrate_exploiter_vs_opponent {self.winrate_vs_opponent}"
+                        )
+
+
+        self.agent.save_dict(self.experiment_path)
+
+        self.save_data()
+        self.save_winrate_against_opponent()
+
+        if type(self.agent) == RainbowAgent:
+            self.save_q_values()
+
+    def save_winrate_against_opponent(self):
+        # ------ create winrate_against_opponent plot ------
+        plt.figure(figsize=(8, 6), dpi=300)
+        plt.plot(np.array(self.all_winrates_vs_opponent), color="red", linewidth=1.5)
+        plt.xlabel("Episodes (100 intervall)")
+        plt.ylabel("Winrate against opponent")
+        plt.title("Performance against agent that gets exploited")
+        plt.savefig(os.path.join(self.experiment_path, f"exploit-{self.agent.MODEL_IDENTIFIER}.png"), dpi=300)
+        plt.close()
