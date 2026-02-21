@@ -699,6 +699,21 @@ class TDMPC2Agent(Agent):
         saving_dir = os.path.join(save_path, self.MODEL_IDENTIFIER + identifier_extension + ".pth")
         torch.save(self.model.state_dict(), saving_dir)
     
+    @staticmethod
+    def _q_head_index_from_key(key: str) -> int | None:
+        """
+        Parse q-head index from keys like: q.qs.{idx}.net....
+        """
+        if not key.startswith("q.qs."):
+            return None
+        parts = key.split(".", 3)
+        if len(parts) < 3 or not parts[2].isdigit():
+            return None
+        return int(parts[2])
+
+    def _is_q_head_key(self, key: str) -> bool:
+        return self._q_head_index_from_key(key) is not None
+
     
     def load_dict(
             self,
@@ -711,7 +726,55 @@ class TDMPC2Agent(Agent):
             load_path: The path from which the model's state dictionary will be loaded
         """
         checkpoint = torch.load(load_path, map_location=self.device)
-        self.model.load_state_dict(checkpoint)
+        if not isinstance(checkpoint, dict):
+            raise RuntimeError(
+                f"Unsupported checkpoint format at {load_path}. "
+                f"Expected a state_dict dict, got {type(checkpoint).__name__}."
+            )
+
+        # Support wrapped checkpoints if provided (e.g., {"state_dict": ...}).
+        for candidate_key in ("state_dict", "model_state_dict", "model"):
+            nested = checkpoint.get(candidate_key, None)
+            if isinstance(nested, dict):
+                checkpoint = nested
+                break
+
+        current_q_heads = self._q_ensemble_size(self.model.q)
+
+        # Keep only Q-head params the current model can consume.
+        # This allows loading checkpoints with larger/smaller critic ensembles.
+        pruned_checkpoint = {}
+        pruned_extra_q_keys = 0
+        for key, value in checkpoint.items():
+            head_idx = self._q_head_index_from_key(key) if isinstance(key, str) else None
+            if head_idx is not None and head_idx >= current_q_heads:
+                pruned_extra_q_keys += 1
+                continue
+            pruned_checkpoint[key] = value
+
+        missing_keys, unexpected_keys = self.model.load_state_dict(pruned_checkpoint, strict=False)
+        self.target_model.load_state_dict(self.model.state_dict())
+
+        unexpected_non_q = [k for k in unexpected_keys if not self._is_q_head_key(k)]
+        missing_non_q = [k for k in missing_keys if not self._is_q_head_key(k)]
+        if unexpected_non_q or missing_non_q:
+            details = []
+            if unexpected_non_q:
+                details.append(f"unexpected_non_q={unexpected_non_q[:8]}")
+            if missing_non_q:
+                details.append(f"missing_non_q={missing_non_q[:8]}")
+            raise RuntimeError(
+                "Checkpoint/model mismatch outside Q-ensemble keys while loading "
+                f"{load_path}. {'; '.join(details)}"
+            )
+
+        if self.verbose and (pruned_extra_q_keys > 0 or len(missing_keys) > 0):
+            print(
+                "[TDMPC2Agent] loaded checkpoint with Q-head adaptation | "
+                f"current_q_heads={current_q_heads} | "
+                f"ignored_extra_q_tensors={pruned_extra_q_keys} | "
+                f"missing_q_tensors={len([k for k in missing_keys if self._is_q_head_key(k)])}"
+            )
 
 
     def save_experiment_config(
