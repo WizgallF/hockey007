@@ -9,6 +9,8 @@ import hockey.hockey_env as h_env
 import gymnasium as gym
 from Wrapper import DiscreteActionWrapperHockey
 import matplotlib.pyplot as plt
+import yaml
+
 
 
 def evaluate_agents(
@@ -38,8 +40,6 @@ def evaluate_agents(
             print(f"eval agents for agent " + agents[i] + f" {end-start} seconds passed")
 
             for j in range(i+1, N):
-                agent_architecture = agents[i].split("_")[0]
-                opponent_architecture = agents[j].split("_")[0]
 
                 agent_config_file = agents[i].split(".")[0] + ".yaml"
                 opponent_config_file = agents[j].split(".")[0] + ".yaml"
@@ -49,6 +49,15 @@ def evaluate_agents(
 
                 agent_config_path = os.path.join(population_path, agent_config_file)
                 opponent_config_path = os.path.join(population_path, opponent_config_file)
+
+                with open(agent_config_path, "r") as f:
+                        agent_config = yaml.safe_load(f) or {}
+
+                with open(opponent_config_path, "r") as f:
+                        opponent_config = yaml.safe_load(f) or {}
+
+                agent_architecture = str(agent_config.get("MODEL_IDENTIFIER", "")).strip().lower()
+                opponent_architecture = str(opponent_config.get("MODEL_IDENTIFIER", "")).strip().lower()
 
                 # ----- load agent -----
                 if agent_architecture == "rainbow":
@@ -184,5 +193,5 @@ def discrete_to_continuous(discrete_action):
 
 if __name__ == "__main__":
     evaluate_agents(
-          population_path="/home/stud217/hockey007/evaluation/eval_agent_pool"
+          population_path="/home/stud217/hockey007/experiments_rainbow/fixed_opponent_pool #5"
     )
