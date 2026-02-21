@@ -164,6 +164,7 @@ def main() -> int:
                 opponent,
                 discrete_actions=False,
                 population_path=str(population_path) if population_path is not None else None,
+                num_parallel_envs=num_parallel_envs,
             )
             score = score_from_stats(trainer.statistics, trainer.mavg_window_size)
         finally:

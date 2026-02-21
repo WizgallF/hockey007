@@ -1,0 +1,117 @@
+program: TDMPC2_tune.py
+method: bayes
+metric:
+  name: best_mavg_rew
+  goal: maximize
+parameters:
+  # --- Fixed baseline from best Muon+Epistemic run ---
+  BATCH_SIZE:
+    values: [256]
+  GAMMA:
+    values: [0.9523202673766784]
+  MPC_ITERS:
+    values: [4]
+  MPC_SAMPLES:
+    values: [256]
+  MPC_TEMP:
+    values: [1.0881170689746331]
+  TRAIN_HORIZON:
+    values: [12]
+  Q_ENSEMBLE_SIZE:
+    values: [6]
+  num_parallel_envs:
+    values: [1]
+  OPTIMIZER:
+    values: ["muon"]
+  FIXED_OPPONENTS:
+    values: [true]
+  K_AGAINST_STRONG:
+    values: [0]
+
+  # --- Fixed Muon settings from best run ---
+  MUON_ADAM_LR:
+    values: [0.0001641241999476511]
+  MUON_ADAM_EPS:
+    values: [4.948302024000078e-07]
+  MUON_ADAM_BETA_1:
+    values: [0.8345271290394018]
+  MUON_ADAM_BETA_2:
+    values: [0.9817920285869506]
+  MUON_WEIGHT_DECAY:
+    values: [0.0008269788152919206]
+  MUON_PI_WEIGHT_DECAY:
+    values: [0.0004966950295996891]
+  MUON_ADAM_WEIGHT_DECAY:
+    values: [0.000011388984129766811]
+  MUON_PI_LR:
+    distribution: log_uniform_values
+    min: 3.0e-05
+    max: 4.0e-04
+  MUON_PI_ADAM_LR:
+    values: [0.0002143944922633812]
+  MUON_PI_ADAM_WEIGHT_DECAY:
+    values: [0.0000922062327863376]
+
+  
+  LR:
+    distribution: log_uniform_values
+    min: 1.0e-05
+    max: 1.0e-03
+  EXPL_NOISE:
+    distribution: uniform
+    min: 0.08
+    max: 0.30
+  MUON_LR:
+    distribution: log_uniform_values
+    min: 3.0e-04
+    max: 2.0e-03
+  MUON_MOMENTUM:
+    distribution: uniform
+    min: 0.85
+    max: 0.97
+  MPC_SIGMA:
+    distribution: uniform
+    min: 0.25
+    max: 0.50
+  TAU:
+    distribution: uniform
+    min: 0.015
+    max: 0.060
+
+  # --- Epistemic settings ---
+  USE_EPISTEMIC_EXPLORATION:
+    values: [true]
+  EPISTEMIC_METHOD:
+    values: ["model_disagreement"]
+  EPISTEMIC_BONUS_BETA:
+    distribution: uniform
+    min: 0.0
+    max: 0.08
+  EPISTEMIC_BONUS_BETA_END:
+    values: [0.0]
+  EPISTEMIC_BONUS_DECAY_STEPS:
+    values: [400000]
+  EPISTEMIC_NORMALIZE:
+    values: [true]
+
+run_cap: 200
+command:
+  - ${env}
+  - python3
+  - -u
+  - ${program}
+  - --sweep
+  - --self_play
+  - --self_play_population_path
+  - self_play_opponent_pool
+  - --env
+  - Hockey-One-v0
+  - --base_dir
+  - experiments
+  - --best_yaml_name
+  - td_best_params_muon_epi_self_play.yaml
+  - --num_episodes
+  - "1200"
+  - --training_rounds
+  - "10"
+  - --verbose

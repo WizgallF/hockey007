@@ -387,6 +387,7 @@ class Training():
                             f"[SelfPlay][Round {i_training_round + 1}] "
                             f"new_best_saved | population_size={self.population_size}"
                         )
+                    self.last_winrate_vs_pool = winrate_vs_pool
             
             
 
