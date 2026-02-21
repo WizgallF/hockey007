@@ -17,10 +17,10 @@ BATCH_SIZE: 64
 GAMMA: 0.99
 
 BUFFER_SIZE: 1000000
-NUM_EPISODES: 1 #1500   #3000 episode = 500k steps for self play num episodes= 10000 roughly 1M trans
+NUM_EPISODES: 1500   #3000 episode = 500k steps for self play num episodes= 10000 roughly 1M trans
 START_TRAINING: 1000
 ACTION_REPEAT: 1
-TRAINING_ROUNDS: 2 #80 
+TRAINING_ROUNDS: 90 #80 
 FIXED_OPPONENTS: True  ##
 K_AGAINST_STRONG: 10  ##
 

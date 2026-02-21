@@ -163,6 +163,73 @@ class Core:
             population_path=population_path,
             num_parallel_envs=num_parallel_envs)
 
+    def exploit_agent(
+            self, 
+            agent_name: str = None, 
+            env_name: str = None, 
+            base_dir = "experiments",
+            save_intermediate_agents: bool = False,
+            verbose=False,
+            agent_load_path = None,
+            population_path = None,
+            bins = 5,
+            num_parallel_envs: int = 1):
+        
+        print(agent_name)
+            
+        if env_name == "Hockey-One-v0":
+            env = h_env.HockeyEnv()
+            if agent_name == "rainbow":
+                proxy_env = DiscreteActionWrapperHockey(env)
+                n_actions = proxy_env.action_space.n
+                state, info = proxy_env.reset()
+                n_observations = len(state)
+                single_player_action_space = None
+            elif agent_name == "ddpg":
+                state, info = env.reset()
+                n_observations = len(state)
+                single_player_action_space = spaces.Box(
+                    low=env.action_space.low[:4],
+                    high=env.action_space.high[:4],
+                    dtype=env.action_space.dtype,
+                )
+            else:
+                raise NotImplementedError
+        else:
+            raise NotImplementedError
+
+    
+        if agent_name == "rainbow": 
+            agent = RainbowAgent(
+                n_observations,
+                n_actions,
+                verbose)
+            if agent_load_path is not None:
+                agent.load_dict(agent_load_path)
+        elif agent_name == "ddpg":
+            agent = DDPGAgent(
+                env.observation_space,
+                single_player_action_space,
+                verbose=verbose
+            )
+            if agent_load_path is not None:
+                agent.load_dict(agent_load_path)
+
+        else:
+            raise NotImplementedError
+        
+
+        
+        train_class = Training(agent, env, base_dir, save_intermediate_agents, verbose)
+        discrete_actions = agent_name == "rainbow"
+        
+        train_class.exploit_agent(
+            opponent=agent, 
+            discrete_actions=discrete_actions, 
+            agent_load_path=agent_load_path,
+            population_path=population_path,
+            num_parallel_envs=num_parallel_envs)
+
     def agent_against_human(self):
         pass
 
