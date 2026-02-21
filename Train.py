@@ -259,6 +259,7 @@ class Training():
 
         self.original_env = self.env
         self.opponent = self._copy_agent_without_replay_buffer()
+        print(type(self.opponent))
         self.best_opponent = self._copy_agent_without_replay_buffer()
         self.population_size = 0
         self.MODEL_IDENTIFIER = self.agent.MODEL_IDENTIFIER
@@ -278,6 +279,15 @@ class Training():
 
         # Add random agent to population for self play
         population_path = os.path.join(self.experiment_path, "agent_population")
+
+        # init winrate against fixed opponent pool
+        if self.fixed_opponents:
+            files = [f for f in os.listdir(self.fixed_opponents_path) if os.path.isfile(os.path.join(self.fixed_opponents_path, f)) and f.split(".")[1] == "pth"]
+            N = len(files)
+            self.fixed_opponents_labels = files
+            self.fixed_opponents_labels.extend(["weak opp", "strong opp"])
+            self.last_winrate_vs_pool = np.zeros(shape=(N + 2,))
+            self.all_winrates_vs_pool = []
     
         self.save_to_population(population_path, i_training_round=0)
         
@@ -307,6 +317,8 @@ class Training():
             # Wrap environment with Player 2
 
             if use_parallel_mode:
+                if not hasattr(self, "best_parallel_pool_avg_winrate"):
+                    self.best_parallel_pool_avg_winrate = float("-inf")
                 schedule = self._build_parallel_opponent_schedule(
                     num_envs=int(num_parallel_envs),
                     population_path=population_path,
@@ -321,6 +333,7 @@ class Training():
                     discrete_actions,
                     i_training_round,
                     start,
+                    population_path,
                 )
                 if self.verbose:
                     self._log_parallel_round_summary(i_training_round, parallel_round_stats)
@@ -343,31 +356,52 @@ class Training():
                     self._run_self_play_single_round(i_training_round, start)
 
             winrate_vs_best = self.agent_against_agent_eval(self.agent, self.best_opponent)
-            if self.verbose:
-                print(
-                    f"[SelfPlay][Round {i_training_round + 1}] end "
-                    f"| winrate_vs_best={winrate_vs_best:.3f} | {self._latest_self_play_stats()}"
-                )
 
-            if winrate_vs_best > 0.5:
-                self.best_opponent = self._copy_agent_without_replay_buffer()
-                self.save_to_population(population_path, i_training_round)
+            if not self.fixed_opponents:
+                winrate_vs_best = self.agent_against_agent_eval(self.agent, self.best_opponent)
                 if self.verbose:
                     print(
-                        f"[SelfPlay][Round {i_training_round + 1}] "
-                        f"new_best_saved | population_size={self.population_size}"
+                        f"[SelfPlay][Round {i_training_round + 1}] end "
+                        f"| winrate_vs_best={winrate_vs_best:.3f} | {self._latest_self_play_stats()}"
                     )
+
+                if winrate_vs_best > 0.5:
+                    self.best_opponent = self._copy_agent_without_replay_buffer()
+                    self.save_to_population(population_path, i_training_round)
+                    if self.verbose:
+                        print(
+                            f"[SelfPlay][Round {i_training_round + 1}] "
+                            f"new_best_saved | population_size={self.population_size}"
+                        )
+            else:
+                opponents = self._load_population_opponents(self.fixed_opponents_path)
+
+                winrate_vs_pool = self._agent_against_pool_eval(self.agent, opponents)
+                self.all_winrates_vs_pool.append(winrate_vs_pool)
+
+                if np.sum(winrate_vs_pool - self.last_winrate_vs_pool) > 0:
+                    self.best_opponent = self._copy_agent_without_replay_buffer()
+                    self.save_to_population(population_path, i_training_round)
+                    if self.verbose:
+                        print(
+                            f"[SelfPlay][Round {i_training_round + 1}] "
+                            f"new_best_saved | population_size={self.population_size}"
+                        )
             
             
 
         self.save_data()
         self.save_performance_against_basic_opp()
 
+        if self.fixed_opponents:
+            self.save_performance_against_fixed_pool()
+
         if type(self.agent) == RainbowAgent:
             self.save_q_values()
 
-        
-        eval_results = self.evaluate_agents(population_path)
+        if not self.fixed_opponents:
+            eval_results = self.evaluate_agents(population_path)
+    
         
     def _run_self_play_single_round(
             self,
@@ -676,7 +710,8 @@ class Training():
             schedule,
             discrete_actions,
             i_training_round,
-            start):
+            start,
+            population_path):
         envs = [Envwrapper(h_env.HockeyEnv(), player2=descriptor["agent"], discrete_actions=discrete_actions) for descriptor in schedule]
         num_envs = len(envs)
         target_episodes = self.agent.NUM_EPISODES * num_envs
@@ -767,6 +802,32 @@ class Training():
                     agent_strong_eval = self.agent_against_basicopp_eval(self.agent, weak=False)
                     self.agent_against_basic_opp.append(agent_basic_eval)
                     self.agent_against_strong_opp.append(agent_strong_eval)
+
+                    active_pool_path, _ = self._active_parallel_pool_path(population_path)
+                    pool_opponents = self._load_population_opponents(active_pool_path)
+                    pool_eval_games = 75
+                    pool_eval_winrates = self._agent_against_pool_eval(
+                        self.agent,
+                        pool_opponents,
+                        num_episodes=pool_eval_games,
+                    )
+                    avg_pool_winrate = float(np.mean(pool_eval_winrates)) if len(pool_eval_winrates) > 0 else 0.0
+                    if self.verbose:
+                        print(
+                            f"[SelfPlay][Round {i_training_round + 1}] "
+                            f"pool_avg_eval@episode={eval_episode} "
+                            f"| games_per_opponent={pool_eval_games} "
+                            f"| avg_winrate={avg_pool_winrate:.3f}"
+                        )
+                    if avg_pool_winrate > self.best_parallel_pool_avg_winrate:
+                        self.best_parallel_pool_avg_winrate = avg_pool_winrate
+                        self.agent.save_dict(self.experiment_path)
+                        if self.verbose:
+                            print(
+                                f"[SelfPlay][Round {i_training_round + 1}] "
+                                f"new_best_parallel_pool_avg@episode={eval_episode} "
+                                f"| avg_winrate={avg_pool_winrate:.3f} | model_saved"
+                            )
                     if self.verbose:
                         print(
                             f"[SelfPlay][Round {i_training_round + 1}] "
@@ -826,6 +887,27 @@ class Training():
 
 
         # TODO: make population path self argument
+
+    def _agent_against_pool_eval(
+        self,
+        player1, 
+        opponents,
+        num_episodes = 50):
+    
+        winrates = []
+        for opponent in opponents:
+            winrate_against_opponent = self.agent_against_agent_eval(
+                player1,
+                opponent,
+                num_episodes=num_episodes,
+            )
+            winrates.append(winrate_against_opponent)
+
+        
+        winrates.append(self.agent_against_basicopp_eval(self.agent, weak=True, num_episodes=num_episodes))
+        winrates.append(self.agent_against_basicopp_eval(self.agent, weak=False, num_episodes=num_episodes))
+
+        return np.asarray(winrates)
 
     def agent_against_agent_eval(
             self, 
@@ -1012,10 +1094,165 @@ class Training():
                         self.last_selected_opponent_info = "fallback_weak_basic"
 
 
+    def save_performance_against_fixed_pool(self):
+            self.all_winrates_vs_pool = np.vstack(self.all_winrates_vs_pool)
+
+
+            N = self.all_winrates_vs_pool.shape[1]
+            colors = plt.cm.viridis(np.linspace(0, 1, N))
+
+            for i in range(N):
+                all_winrates_vs_i = self.all_winrates_vs_pool[:, i]
+                plt.plot(all_winrates_vs_i, label=f"{self.fixed_opponents_labels[i]}", color=colors[i], linewidth=1.5)
+            
+            plt.xlabel("Evaluation intervalls")
+            plt.ylabel("Average Agent Winrate vs Opponents")
+            plt.title("Performance against Fixed Opponent pool")
+            plt.legend()
+            plt.savefig(os.path.join(self.experiment_path, f"opponent_pool_performance-{self.agent.MODEL_IDENTIFIER}.png"), dpi=300)
+            plt.close()
 
 
 
 
+    def exploit_agent(
+            self, 
+            opponent,
+            discrete_actions = False,
+            agent_load_path = None,
+            population_path = None,
+            num_parallel_envs: int = 1):
 
-    def save(self, *args, **kwargs):
-        pass
+        torch.set_default_dtype(torch.float32)
+
+        self.original_env = self.env
+        self.opponent = self._copy_agent_without_replay_buffer()
+        self.population_size = 0
+        self.MODEL_IDENTIFIER = self.agent.MODEL_IDENTIFIER
+        use_parallel_mode = int(num_parallel_envs) > 1
+
+        # print hyperparameter settings to console 
+        if self.verbose:
+            self.agent.print_config()
+
+        # Create experiment folder and save config
+        self.experiment_path = self.agent.save_experiment_config(self.base_dir)
+
+
+        start = time.time()
+        best_mv_avg_reward = float('-inf')
+        self.winrate_vs_opponent = None
+        self.all_winrates_vs_opponent = []
+
+
+        parallel_round_stats = None
+        
+
+        # Wrap environment with Player 2
+
+        if use_parallel_mode:
+            pass
+            """if not hasattr(self, "best_parallel_pool_avg_winrate"):
+                self.best_parallel_pool_avg_winrate = float("-inf")
+            schedule = self._build_parallel_opponent_schedule(
+                num_envs=int(num_parallel_envs),
+                population_path=population_path,
+            )
+            if self.verbose:
+                print(
+                    f"[SelfPlay][Round {i_training_round + 1}] mode=parallel_pool "
+                    f"| parallel_envs={len(schedule)} | {self._format_parallel_composition(schedule)}"
+                )
+            parallel_round_stats = self._run_self_play_parallel_round(
+                schedule,
+                discrete_actions,
+                i_training_round,
+                start,
+                population_path,
+            )
+            if self.verbose:
+                self._log_parallel_round_summary(i_training_round, parallel_round_stats)
+
+"""
+        else:
+            
+            self.env = Envwrapper(self.original_env, self.opponent, discrete_actions)
+            
+            for i_episode in range(self.agent.NUM_EPISODES):
+                self.agent.cur_episode = i_episode
+
+                # --------- init environment -----------
+                state, info = self.env.reset()
+                
+                for t in count():
+
+                    # ------ act ------
+                    action = self.agent.act(self.env, state, i_episode, self.statistics)
+                    next_state, reward, terminated, truncated, _ = self.env.step(action)
+
+
+                    # ------ observe ------
+                    self.agent.observe(state, action, reward, next_state, terminated)
+                    self.statistics["ep_rew"][-1] += float(reward) 
+                    
+
+                    # ------ move to next state ------
+                    state = next_state
+
+
+                    # ------ update ------
+                    if i_episode >= self.agent.START_TRAINING:
+                        self.agent.update(self.statistics)
+
+                    # ------ terminate episode ------
+                    done = terminated or truncated
+                    if done:
+                        self.statistics["ep_rew"].append(0)
+                        break
+            
+
+
+                
+                # ------ add to statistic------
+                n = len(self.statistics["ep_rew"]) 
+                if n > self.mavg_window_size + 1:
+                    mv_avg_reward = np.mean(self.statistics["ep_rew"][-self.mavg_window_size:-1])
+                    self.statistics["mv_avg_rew"].append(mv_avg_reward)
+
+                    
+
+                
+                if i_episode >= self.agent.START_TRAINING and i_episode % 100 == 0:
+                    self.winrate_vs_opponent = self.agent_against_agent_eval(self.agent, self.opponent)
+                    self.all_winrates_vs_opponent.append(self.winrate_vs_opponent)
+
+                    if self.winrate_vs_opponent > 0.9:
+                        self.agent.save_dict(self.experiment_path)
+                        break
+
+
+                    end = time.time()
+                    print(
+                            f"[Exploitation][Episode {i_episode}] "
+                            f"| elapsed={end - start:.1f}s "
+                            f"| winrate_exploiter_vs_opponent {self.winrate_vs_opponent}"
+                        )
+
+
+        self.agent.save_dict(self.experiment_path)
+
+        self.save_data()
+        self.save_winrate_against_opponent()
+
+        if type(self.agent) == RainbowAgent:
+            self.save_q_values()
+
+    def save_winrate_against_opponent(self):
+        # ------ create winrate_against_opponent plot ------
+        plt.figure(figsize=(8, 6), dpi=300)
+        plt.plot(np.array(self.all_winrates_vs_opponent), color="red", linewidth=1.5)
+        plt.xlabel("Episodes (100 intervall)")
+        plt.ylabel("Winrate against opponent")
+        plt.title("Performance against agent that gets exploited")
+        plt.savefig(os.path.join(self.experiment_path, f"exploit-{self.agent.MODEL_IDENTIFIER}.png"), dpi=300)
+        plt.close()
