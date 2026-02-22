@@ -77,10 +77,11 @@ class RainbowClientAgent(Agent):
 
         n_observations = len(state)
         n_actions = env.action_space.n
-        self.hockey_agent = RainbowAgent(
-            n_observations,
-            n_actions,
-            config_path= "/home/nils-klute/Documents/machine_learning/Reinforcement Learning/hockey007/experiments_rainbow/2026-02-02_11-59-12_rainbow noise sigma0=0.5/config.yaml")
+       
+        self.hockey_agent  = RainbowAgent(
+                n_observations=n_observations,
+                n_actions=n_actions,
+                config_path= "/home/nils-klute/Documents/machine_learning/Reinforcement Learning/hockey007/experiments_rainbow/2026-02-02_11-59-12_rainbow noise sigma0=0.5/config.yaml")
         
         self.hockey_agent.load_dict("/home/nils-klute/Documents/machine_learning/Reinforcement Learning/hockey007/experiments_rainbow/2026-02-02_11-59-12_rainbow noise sigma0=0.5/rainbow.pth")
 

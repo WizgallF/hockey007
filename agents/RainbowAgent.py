@@ -23,7 +23,8 @@ class RainbowAgent(Agent):
             n_observations: int,
             n_actions: int,
             verbose = False,
-            config_path: str = "configs/rainbow_config.yaml"
+            config_path: str = "configs/rainbow_config.yaml",
+            eval_mode = True
             ):
 
         print(config_path)
@@ -43,6 +44,9 @@ class RainbowAgent(Agent):
         self.target_net = RainbowNetwork(n_observations, n_actions, self.device, self.DUELING, self.NOISY, self.DISTRIBUTIONAL_Q, n_atoms=self.N_ATOMS, sigma0=self.SIGMA0).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.cur_episode = 0
+
+        if eval_mode:
+            self.policy_net.eval()
 
         # ------ optimizer ------
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=self.LR, betas=(self.ADAM_BETA_1, self.ADAM_BETA_2), eps=self.ADAM_EPS)
