@@ -70,9 +70,10 @@ class Core:
     
         if agent_name == "rainbow": 
             agent = RainbowAgent(
-                n_observations,
-                n_actions,
-                verbose)
+                n_observations=n_observations,
+                n_actions=n_actions,
+                verbose=verbose,
+                eval_mode=False)
         elif agent_name == "ddpg":
             agent = DDPGAgent(
                 base_obs_space,
@@ -134,9 +135,10 @@ class Core:
     
         if agent_name == "rainbow": 
             agent = RainbowAgent(
-                n_observations,
-                n_actions,
-                verbose)
+                n_observations=n_observations,
+                n_actions=n_actions,
+                verbose=verbose,
+                eval_mode=False)
             if agent_load_path is not None:
                 agent.load_dict(agent_load_path)
         elif agent_name == "ddpg":
@@ -201,9 +203,10 @@ class Core:
     
         if agent_name == "rainbow": 
             agent = RainbowAgent(
-                n_observations,
-                n_actions,
-                verbose)
+                n_observations=n_observations,
+                n_actions=n_actions,
+                verbose=verbose,
+                eval_mode=False)
             if agent_load_path is not None:
                 agent.load_dict(agent_load_path)
         elif agent_name == "ddpg":
