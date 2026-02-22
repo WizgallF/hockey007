@@ -331,6 +331,18 @@ class Core:
                 )
                 agent.load_dict(load_path=agent_path)
                 return agent
+            if key in {"tdmpc2"}:
+                single_player_action_space = spaces.Box(
+                    low=env.action_space.low[:4],
+                    high=env.action_space.high[:4],
+                    dtype=env.action_space.dtype,
+                )
+                agent =  TDMPC2Agent(
+                    single_player_action_space,
+                    env.observation_space
+                )
+                agent.load_dict(load_path=agent_path)
+                return agent
         return player
     
     def _discrete_to_continuous(self, discrete_action):
