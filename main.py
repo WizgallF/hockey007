@@ -19,6 +19,7 @@ def main ():
     parser.add_argument ( '--play', default=False, action="store_true", help="Let an agent play against the basic opponent" )
     parser.add_argument ( '--agent', type=str, default="rainbow", help = "Specify the agent to use for training/evaluation")
     parser.add_argument ( '--num_parallel_envs', type=int, default=1, help = "Number of parallel environments to use during training")
+    parser.add_argument ( '--train_against_weak', default=False, action="store_true", help="Train against the weak opponent" )
 
     parser.add_argument ( '--playagent_1_type', type=str, default="rainbow", help = "Specify the agent 1 to use for evaluation")
     parser.add_argument ( '--playagent1_path', type=str, default=None, help = "Path to the trained agent 1 for evaluation")
@@ -45,7 +46,8 @@ def main ():
             args.base_dir, 
             args.int_agents, 
             args.verbose,
-            num_parallel_envs = args.num_parallel_envs
+            num_parallel_envs = args.num_parallel_envs, 
+            weak=args.train_against_weak
             )
 
     elif args.train_self_play:
@@ -56,8 +58,7 @@ def main ():
             save_intermediate_agents=args.int_agents, 
             verbose=args.verbose, 
             agent_load_path=args.playagent1_path,
-            population_path=args.pop_path,
-            num_parallel_envs=args.num_parallel_envs)
+            population_path=args.pop_path)
 
     elif args.play:        
         core.play(
@@ -68,17 +69,6 @@ def main ():
             agent1_config=args.playagent1_config, 
             agent2_path=args.playagent2_path, 
             agent2_config=args.playagent2_config)
-            
-    elif args.exploit:
-        core.exploit_agent(
-            agent_name=args.agent, 
-            env_name=args.env, 
-            base_dir=args.base_dir, 
-            save_intermediate_agents=args.int_agents, 
-            verbose=args.verbose, 
-            agent_load_path=args.playagent1_path,
-            population_path=args.pop_path,
-            num_parallel_envs=args.num_parallel_envs)
 
 
 
