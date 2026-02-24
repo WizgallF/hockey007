@@ -131,7 +131,7 @@ def evaluate_agents(
         plt.ylabel("Agents")
         plt.title("Evaluation of Agent pool")
         plt.tight_layout()
-        plt.savefig(os.path.join(population_path, "evaluation_against_agent_pool.png"), dpi=300)
+        plt.savefig(os.path.join(population_path, "evaluation_against_agent_pool.svg"), dpi=300)
         plt.close()
 
 
@@ -227,7 +227,7 @@ def evaluate_agents_against_basic(
         plt.ylabel("Agents")
         plt.title(f"Pool eval against {opponent}")
         plt.tight_layout()
-        plt.savefig(os.path.join(population_path, f"evaluation_against_{opponent}.png"), dpi=300)
+        plt.savefig(os.path.join(population_path, f"evaluation_against_{opponent}.svg"), dpi=300)
         plt.close()
 
 

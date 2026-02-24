@@ -227,7 +227,7 @@ class Training():
         plt.ylabel("Rewards per Episode")
         
         plt.title(f"Training against the {self.opponent_name}. Final average winrate: {self.agent_eval:.2f}")
-        plt.savefig(os.path.join(self.experiment_path, f"episode_rewards-{self.agent.MODEL_IDENTIFIER}.png"), dpi=300)
+        plt.savefig(os.path.join(self.experiment_path, f"episode_rewards-{self.agent.MODEL_IDENTIFIER}.svg"), dpi=300)
         plt.close()
 
         np.save(os.path.join(self.experiment_path, f"ep_rew_data-{self.agent.MODEL_IDENTIFIER}.npy"), np.array(self.statistics["ep_rew"]))
@@ -240,7 +240,7 @@ class Training():
         plt.xlabel("Time Step")
         plt.ylabel("Loss")
         plt.title("Training Loss per Time Step")
-        plt.savefig(os.path.join(self.experiment_path, f"training_losses-{self.agent.MODEL_IDENTIFIER}.png"), dpi=300)
+        plt.savefig(os.path.join(self.experiment_path, f"training_losses-{self.agent.MODEL_IDENTIFIER}.svg"), dpi=300)
         plt.close()
 
         np.save(os.path.join(self.experiment_path, f"training_losses_data-{self.agent.MODEL_IDENTIFIER}.npy"), np.array(self.statistics["tr_loss"]))
@@ -254,7 +254,7 @@ class Training():
         plt.xlabel("Time Step")
         plt.ylabel("Q-values")
         plt.title("Training Loss per Time Step")
-        plt.savefig(os.path.join(self.experiment_path, f"q_values-{self.agent.MODEL_IDENTIFIER}.png"), dpi=300)
+        plt.savefig(os.path.join(self.experiment_path, f"q_values-{self.agent.MODEL_IDENTIFIER}.svg"), dpi=300)
         plt.close()
 
         np.save(os.path.join(self.experiment_path, f"mean_q_values_data-{self.agent.MODEL_IDENTIFIER}.npy"), np.array(self.statistics["mean_q"]))
@@ -1020,7 +1020,7 @@ class Training():
         plt.xlabel("Episodes (1k intervall)")
         plt.ylabel("Proportion of games won")
         plt.title("Performance against basic opponent")
-        plt.savefig(os.path.join(self.experiment_path, f"basic_opponent-{self.agent.MODEL_IDENTIFIER}.png"), dpi=300)
+        plt.savefig(os.path.join(self.experiment_path, f"basic_opponent-{self.agent.MODEL_IDENTIFIER}.svg"), dpi=300)
         plt.close()
         # ------ create performance_against_strong_opp plot ------
         plt.figure(figsize=(8, 6), dpi=300)
@@ -1028,7 +1028,7 @@ class Training():
         plt.xlabel("Episodes (1k intervall)")
         plt.ylabel("Proportion of games won")
         plt.title("Performance against strong opponent")
-        plt.savefig(os.path.join(self.experiment_path, f"strong_opponent-{self.agent.MODEL_IDENTIFIER}.png"), dpi=300)
+        plt.savefig(os.path.join(self.experiment_path, f"strong_opponent-{self.agent.MODEL_IDENTIFIER}.svg"), dpi=300)
         plt.close()
     
     def _discrete_to_continuous(self, discrete_action):
@@ -1270,5 +1270,5 @@ class Training():
         plt.xlabel("Episodes (100 intervall)")
         plt.ylabel("Winrate against opponent")
         plt.title("Performance against agent that gets exploited")
-        plt.savefig(os.path.join(self.experiment_path, f"exploit-{self.agent.MODEL_IDENTIFIER}.png"), dpi=300)
+        plt.savefig(os.path.join(self.experiment_path, f"exploit-{self.agent.MODEL_IDENTIFIER}.svg"), dpi=300)
         plt.close()
