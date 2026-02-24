@@ -1,11 +1,16 @@
 from __future__ import annotations
-
+import os
 import argparse
 import uuid
 import gymnasium as gym
 
 import sys
-sys.path.append('../')
+current_dir = os.path.dirname(os.path.abspath(__file__))
+
+parent_dir = os.path.dirname(current_dir)
+
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
 
 import hockey.hockey_env as h_env
 import numpy as np
@@ -81,9 +86,9 @@ class RainbowClientAgent(Agent):
         self.hockey_agent  = RainbowAgent(
                 n_observations=n_observations,
                 n_actions=n_actions,
-                config_path= "/home/nils-klute/Documents/machine_learning/Reinforcement Learning/hockey007/experiments_rainbow/2026-02-02_11-59-12_rainbow noise sigma0=0.5/config.yaml")
+                config_path= "/home/stud217/hockey007/self_play_opponent_pool/rainbow_fixed opponents  pool #5.yaml")
         
-        self.hockey_agent.load_dict("/home/nils-klute/Documents/machine_learning/Reinforcement Learning/hockey007/experiments_rainbow/2026-02-02_11-59-12_rainbow noise sigma0=0.5/rainbow.pth")
+        self.hockey_agent.load_dict("/home/stud217/hockey007/self_play_opponent_pool/rainbow_fixed opponents  pool #5.pth")
 
     def get_step(self, observation: list[float]) -> list[float]:
         # NOTE: If your agent is using discrete actions (0-7), you can use
@@ -112,6 +117,47 @@ class RainbowClientAgent(Agent):
             f"{stats[0]} against the opponent with score: {stats[1]}"
         )
 
+class DDPGClientAgent(Agent):
+    """A hockey agent that can be weak or strong."""
+
+    def __init__(self) -> None:
+        super().__init__()
+
+        env = gym.envs.make("Hockey-One-v0", mode=0, weak_opponent=True)
+        base_obs_space = env.observation_space
+        base_act_space = env.action_space
+
+       
+        self.hockey_agent = DDPGAgent(
+            observation_space=base_obs_space,
+            action_space=base_act_space,
+            config_path="/home/stud217/hockey007/self_play_opponent_pool/ddpg_24_02_26_20_57.yaml"
+        )
+        self.hockey_agent.load_dict("/home/stud217/hockey007/self_play_opponent_pool/ddpg_24_02_26_20_57.pth")
+
+    def get_step(self, observation: list[float]) -> list[float]:
+        # NOTE: If your agent is using discrete actions (0-7), you can use
+        # HockeyEnv.discrete_to_continous_action to convert the action:
+        #
+        from hockey.hockey_env import HockeyEnv
+        env = HockeyEnv()
+
+        action = self.hockey_agent.act(env=env, state=observation, greedy=True)
+
+        return action.tolist()
+    
+    def on_start_game(self, game_id) -> None:
+        game_id = uuid.UUID(int=int.from_bytes(game_id))
+        print(f"Game started (id: {game_id})")
+
+    def on_end_game(self, result: bool, stats: list[float]) -> None:
+        text_result = "won" if result else "lost"
+        print(
+            f"Game ended: {text_result} with my score: "
+            f"{stats[0]} against the opponent with score: {stats[1]}"
+        )
+
+
 
 # Function to initialize the agent.  This function is used with `launch_client` below,
 # to lauch the client and connect to the server.
@@ -121,7 +167,7 @@ def initialize_agent(agent_args: list[str]) -> Agent:
     parser.add_argument(
         "--agent",
         type=str,
-        choices=["weak", "strong", "random", "rainbow"],
+        choices=["weak", "strong", "random", "rainbow", "ddpg"],
         default="weak",
         help="Which agent to use.",
     )
@@ -137,6 +183,8 @@ def initialize_agent(agent_args: list[str]) -> Agent:
         agent = RandomAgent()
     elif args.agent == "rainbow":
         agent = RainbowClientAgent()
+    elif args.agent == "ddpg":
+        agent = DDPGClientAgent()
     else:
         raise ValueError(f"Unknown agent: {args.agent}")
 
