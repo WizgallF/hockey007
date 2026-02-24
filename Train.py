@@ -26,7 +26,9 @@ class Training():
         env = None,
         base_dir = "experiments",
         save_intermediate_agents: bool = False,
-        verbose=False
+        verbose=False,
+        weak=True,
+        env_name = "Pendulum-v1"
         ):
         
         self.statistics = {
@@ -43,7 +45,11 @@ class Training():
         self.base_dir = base_dir
         self.save_intermediate_agents = save_intermediate_agents
         self.verbose = verbose
+        self.weak = weak
         self.mavg_window_size = int(self.agent.NUM_EPISODES / 100)
+        self.env_name = env_name
+
+        self.opponent_name = "strong opponent" if not self.weak else "weak opponent"
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -201,8 +207,9 @@ class Training():
                     print(
                         f"\n** after {episodes_finished} th episode - {end - start:.5f} sec passed**\n"
                     )
-            
 
+        if self.env_name == "Hockey-One-v0":
+            self.agent_eval = self.agent_against_basicopp_eval(self.agent, weak=self.weak)
         self.save_data()
 
         if type(self.agent) == RainbowAgent:
@@ -221,9 +228,17 @@ class Training():
         
         plt.xlabel("Episode Number")
         plt.ylabel("Rewards per Episode")
-        plt.title(f"Rewards per Episode over Time. Mean Evaluation Score: {mean_eval_score:.3f}")
-        plt.savefig(os.path.join(self.experiment_path, f"episode_rewards-{self.agent.MODEL_IDENTIFIER}.png"), dpi=300)
+        if self.env_name == "Hockey-One-v0":
+            plt.title(f"Training against the {self.opponent_name}. Final average winrate: {self.agent_eval:.2f}")
+        elif self.env_name == "Pendulum-v1":
+            plt.title(f"Solving the pendulum upswing problem")
+
+        plt.savefig(os.path.join(self.experiment_path, f"episode_rewards-{self.agent.MODEL_IDENTIFIER}.svg"), dpi=300)
         plt.close()
+
+        np.save(os.path.join(self.experiment_path, f"ep_rew_data-{self.agent.MODEL_IDENTIFIER}.npy"), np.array(self.statistics["ep_rew"]))
+        np.save(os.path.join(self.experiment_path, f"mv_avg_rew_data-{self.agent.MODEL_IDENTIFIER}.npy"), np.array(self.statistics["mv_avg_rew"]))
+
 
         # ------ create loss plot ------
         plt.figure(figsize=(8, 6), dpi=300)
@@ -231,8 +246,10 @@ class Training():
         plt.xlabel("Time Step")
         plt.ylabel("Loss")
         plt.title("Training Loss per Time Step")
-        plt.savefig(os.path.join(self.experiment_path, f"training_losses-{self.agent.MODEL_IDENTIFIER}.png"), dpi=300)
+        plt.savefig(os.path.join(self.experiment_path, f"training_losses-{self.agent.MODEL_IDENTIFIER}.svg"), dpi=300)
         plt.close()
+
+        np.save(os.path.join(self.experiment_path, f"training_losses_data-{self.agent.MODEL_IDENTIFIER}.npy"), np.array(self.statistics["tr_loss"]))
 
     def save_q_values(self):
         # ------ create q-value plot ------
@@ -243,8 +260,12 @@ class Training():
         plt.xlabel("Time Step")
         plt.ylabel("Q-values")
         plt.title("Training Loss per Time Step")
-        plt.savefig(os.path.join(self.experiment_path, f"q_values-{self.agent.MODEL_IDENTIFIER}.png"), dpi=300)
+        plt.savefig(os.path.join(self.experiment_path, f"q_values-{self.agent.MODEL_IDENTIFIER}.svg"), dpi=300)
         plt.close()
+
+        np.save(os.path.join(self.experiment_path, f"mean_q_values_data-{self.agent.MODEL_IDENTIFIER}.npy"), np.array(self.statistics["mean_q"]))
+        np.save(os.path.join(self.experiment_path, f"max_q_values_data-{self.agent.MODEL_IDENTIFIER}.npy"), np.array(self.statistics["max_q"]))
+        np.save(os.path.join(self.experiment_path, f"min_q_values_data-{self.agent.MODEL_IDENTIFIER}.npy"), np.array(self.statistics["min_q"]))
 
     
     def train_self_play(
@@ -1005,7 +1026,7 @@ class Training():
         plt.xlabel("Episodes (1k intervall)")
         plt.ylabel("Proportion of games won")
         plt.title("Performance against basic opponent")
-        plt.savefig(os.path.join(self.experiment_path, f"basic_opponent-{self.agent.MODEL_IDENTIFIER}.png"), dpi=300)
+        plt.savefig(os.path.join(self.experiment_path, f"basic_opponent-{self.agent.MODEL_IDENTIFIER}.svg"), dpi=300)
         plt.close()
         # ------ create performance_against_strong_opp plot ------
         plt.figure(figsize=(8, 6), dpi=300)
@@ -1013,7 +1034,7 @@ class Training():
         plt.xlabel("Episodes (1k intervall)")
         plt.ylabel("Proportion of games won")
         plt.title("Performance against strong opponent")
-        plt.savefig(os.path.join(self.experiment_path, f"strong_opponent-{self.agent.MODEL_IDENTIFIER}.png"), dpi=300)
+        plt.savefig(os.path.join(self.experiment_path, f"strong_opponent-{self.agent.MODEL_IDENTIFIER}.svg"), dpi=300)
         plt.close()
     
     def _discrete_to_continuous(self, discrete_action):
@@ -1074,11 +1095,11 @@ class Training():
         else:
             p = random.random()
             if p < 0.2:
-                self.opponent = h_env.BasicOpponent(weak=False)
-                self.last_selected_opponent_info = "fixed_pool_strong_basic"
-            elif p < 0.4:
                 self.opponent = h_env.BasicOpponent(weak=True)
                 self.last_selected_opponent_info = "fixed_pool_weak_basic"
+            elif p < 0.6:
+                self.opponent = h_env.BasicOpponent(weak=False)
+                self.last_selected_opponent_info = "fixed_pool_strong_basic"
             else:
                 pool = self._load_population_pool(self.fixed_opponents_path, source="fixed_pool")
                 if pool:
@@ -1255,5 +1276,5 @@ class Training():
         plt.xlabel("Episodes (100 intervall)")
         plt.ylabel("Winrate against opponent")
         plt.title("Performance against agent that gets exploited")
-        plt.savefig(os.path.join(self.experiment_path, f"exploit-{self.agent.MODEL_IDENTIFIER}.png"), dpi=300)
+        plt.savefig(os.path.join(self.experiment_path, f"exploit-{self.agent.MODEL_IDENTIFIER}.svg"), dpi=300)
         plt.close()

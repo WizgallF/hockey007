@@ -24,7 +24,8 @@ class Core:
             save_intermediate_agents: bool = False,
             verbose=False,
             bins = 5,
-            num_parallel_envs = 1):
+            num_parallel_envs = 1,
+            weak=True):
         
         print(agent_name)
         
@@ -33,7 +34,7 @@ class Core:
                 return gym.make(env_name)
         elif env_name == "Hockey-One-v0":
             def make_env():
-                return gym.envs.make("Hockey-One-v0", mode=0, weak_opponent=True)
+                return gym.envs.make("Hockey-One-v0", mode=0, weak_opponent=weak)
         else:
             raise NotImplementedError
 
@@ -89,7 +90,7 @@ class Core:
         
 
         
-        train_class = Training(agent, env, base_dir, save_intermediate_agents, verbose)
+        train_class = Training(agent, env, base_dir, save_intermediate_agents, verbose, weak, env_name)
         train_class.train()
 
     

@@ -27,7 +27,6 @@ class RainbowAgent(Agent):
             eval_mode = True
             ):
 
-        print(config_path)
         # ------ load configs from "rainbow_config.yaml" ------
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
