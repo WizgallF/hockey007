@@ -90,7 +90,7 @@ class Core:
         
 
         
-        train_class = Training(agent, env, base_dir, save_intermediate_agents, verbose, weak)
+        train_class = Training(agent, env, base_dir, save_intermediate_agents, verbose, weak, env_name)
         train_class.train()
 
     

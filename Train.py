@@ -27,7 +27,8 @@ class Training():
         base_dir = "experiments",
         save_intermediate_agents: bool = False,
         verbose=False,
-        weak=True
+        weak=True,
+        env_name = "Pendulum-v1"
         ):
         
         self.statistics = {
@@ -46,6 +47,7 @@ class Training():
         self.verbose = verbose
         self.weak = weak
         self.mavg_window_size = int(self.agent.NUM_EPISODES / 100)
+        self.env_name = env_name
 
         self.opponent_name = "strong opponent" if not self.weak else "weak opponent"
 
@@ -205,8 +207,9 @@ class Training():
                     print(
                         f"\n** after {episodes_finished} th episode - {end - start:.5f} sec passed**\n"
                     )
-            
-        self.agent_eval = self.agent_against_basicopp_eval(self.agent, weak=self.weak)
+
+        if self.env_name == "Hockey-One-v0":
+            self.agent_eval = self.agent_against_basicopp_eval(self.agent, weak=self.weak)
         self.save_data()
 
         if type(self.agent) == RainbowAgent:
@@ -225,8 +228,11 @@ class Training():
         
         plt.xlabel("Episode Number")
         plt.ylabel("Rewards per Episode")
-        
-        plt.title(f"Training against the {self.opponent_name}. Final average winrate: {self.agent_eval:.2f}")
+        if self.env_name == "Hockey-One-v0":
+            plt.title(f"Training against the {self.opponent_name}. Final average winrate: {self.agent_eval:.2f}")
+        elif self.env_name == "Pendulum-v1":
+            plt.title(f"Solving the pendulum upswing problem")
+
         plt.savefig(os.path.join(self.experiment_path, f"episode_rewards-{self.agent.MODEL_IDENTIFIER}.svg"), dpi=300)
         plt.close()
 

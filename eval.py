@@ -10,6 +10,7 @@ import gymnasium as gym
 from Wrapper import DiscreteActionWrapperHockey
 import matplotlib.pyplot as plt
 import yaml
+import pandas as pd
 
 
 
@@ -133,6 +134,9 @@ def evaluate_agents(
         plt.tight_layout()
         plt.savefig(os.path.join(population_path, "evaluation_against_agent_pool.svg"), dpi=300)
         plt.close()
+
+        aw_dataframe =pd.DataFrame(average_winrate)
+        aw_dataframe.to_csv(os.path.join(population_path, "evaluation_against_agent_pool.csv"))
 
 
 def evaluate_agents_against_basic(
