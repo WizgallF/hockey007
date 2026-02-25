@@ -218,14 +218,11 @@ def evaluate_agents_against_basic(
 
             agent_won_proportion = agent_against_agent_eval(agent, opponent, num_episodes = num_episodes)
             average_winrate[agents[i]] = agent_won_proportion
-            
-               
 
         
-        
+        aw_dataframe =pd.DataFrame(average_winrate)
+        aw_dataframe.to_csv(os.path.join(population_path, "evaluation_against_{opponent}.csv"))
 
-
-        
         plt.barh(list(average_winrate.keys()), list(average_winrate.values()))
         plt.xlabel("Average Winrate")
         plt.ylabel("Agents")
