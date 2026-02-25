@@ -10,6 +10,7 @@ import gymnasium as gym
 from Wrapper import DiscreteActionWrapperHockey
 import matplotlib.pyplot as plt
 import yaml
+from collections import defaultdict
 import pandas as pd
 
 
@@ -34,6 +35,7 @@ def evaluate_agents(
         N = len(agents)
 
         results = np.zeros(shape=(N,N))
+        result_dict = defauldict(list)
         print(results)
         start = time.time()
         for i in range(N):
@@ -113,29 +115,33 @@ def evaluate_agents(
 
                 
 
-                agent_won_proportion = agent_against_agent_eval(agent, opponent, num_episodes = num_episodes)
+                player1_wins = agent_against_agent_eval(agent, opponent, num_episodes = num_episodes)
                 
-                results[i][j] = agent_won_proportion
-                results[j][i] =  1 - agent_won_proportion
+                result_dict[agents[i]].extend(list(player1_wins))
+                result_dict[agents[j]].extend(list(1 - player1_wins))
+                
 
         
         
 
-        average_winrate = dict()
+        winrate_stats = dict()
 
         for i in range(N):
-            i_average_winrate = np.sum(results[i]) / (N-1)
-            average_winrate[agents[i]] = float(i_average_winrate)
+            i_mean_winrate = np.mean(result_dict(agents[i]))
+            i_std_winrate = np.std(result_dict(agents[i]))
+            winrate_stats[agents[i]] = (i_mean_winrate, i_std_winrate)
 
-        plt.barh(list(average_winrate.keys()), list(average_winrate.values()))
+        """plt.barh(list(average_winrate.keys()), list(average_winrate.values()))
         plt.xlabel("Average Winrate")
         plt.ylabel("Agents")
         plt.title("Evaluation of Agent pool")
         plt.tight_layout()
         plt.savefig(os.path.join(population_path, "evaluation_against_agent_pool.svg"), dpi=300)
-        plt.close()
+        plt.close()"""
 
-        aw_dataframe =pd.DataFrame(average_winrate)
+
+
+        aw_dataframe =pd.DataFrame(winrate_stats)
         aw_dataframe.to_csv(os.path.join(population_path, "evaluation_against_agent_pool.csv"))
 
 
@@ -269,7 +275,10 @@ def agent_against_agent_eval(
 
     env.close()
 
-    return round(score["player1"]/num_episodes, ndigits=3)
+    player1_wins = np.ones(shape=(score["player1"],)).extend(np.zeros(shape=(score["player2"],)))
+
+
+    return player1_wins
 
 
 def resolve_eval_action(player, env, obs):
@@ -298,14 +307,20 @@ def discrete_to_continuous(discrete_action):
 
 
 if __name__ == "__main__":
+    num_episodes = 1
     evaluate_agents(
-          population_path="/home/stud217/hockey007/self_play_opponent_pool"
+          population_path="/home/stud308/hockey007/self_play_opponent_pool",
+          num_episodes=num_episodes
+    )
+    
+    """
+    evaluate_agents_against_basic(
+          population_path="/home/stud308/hockey007/self_play_opponent_pool",
+          weak=False,
+          num_episodes=num_episodes
     )
     evaluate_agents_against_basic(
-          population_path="/home/stud217/hockey007/self_play_opponent_pool",
-          weak=False
-    )
-    evaluate_agents_against_basic(
-          population_path="/home/stud217/hockey007/self_play_opponent_pool",
-          weak=True
-    )
+          population_path="/home/stud308/hockey007/self_play_opponent_pool",
+          weak=True,
+          num_episodes=num_episodes
+    )"""
