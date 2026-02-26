@@ -12,6 +12,14 @@ class Envwrapper():
             env,
             player2,
             discrete_actions = False):
+        """
+        A wrapper to wrap an opponent into the environment.
+        ---------
+        Parameters:
+            env: The environment
+            player2: The opponent to wrap up
+            discrete_actions: Whether discrete actions are used
+        """
         self.env = env
         self.player2 = self._resolve_player(player2)
         self.discrete_actions = discrete_actions

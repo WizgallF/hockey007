@@ -10,7 +10,6 @@ import gymnasium as gym
 from Wrapper import DiscreteActionWrapperHockey
 import matplotlib.pyplot as plt
 import yaml
-from collections import defaultdict
 import pandas as pd
 
 
@@ -35,8 +34,6 @@ def evaluate_agents(
         N = len(agents)
 
         results = np.zeros(shape=(N,N))
-        result_dict = defaultdict(list)
-        print(results)
         start = time.time()
         for i in range(N):
             end = time.time()
@@ -115,156 +112,31 @@ def evaluate_agents(
 
                 
 
-                player1_wins = agent_against_agent_eval(agent, opponent, num_episodes = num_episodes)
+                agent_won_proportion = agent_against_agent_eval(agent, opponent, num_episodes = num_episodes)
                 
-                result_dict[agents[i]].extend(list(player1_wins))
-                result_dict[agents[j]].extend(list(1 - player1_wins))
-                
+                results[i][j] = agent_won_proportion
+                results[j][i] =  1 - agent_won_proportion
 
         
         
 
-        winrate_stats = dict()
+        average_winrate = dict()
 
         for i in range(N):
-            i_mean_winrate = np.mean(result_dict(agents[i]))
-            i_std_winrate = np.std(result_dict(agents[i]))
-            winrate_stats[agents[i]] = (i_mean_winrate, i_std_winrate)
+            i_average_winrate = np.sum(results[i]) / (N-1)
+            average_winrate[agents[i]] = float(i_average_winrate)
 
-        """plt.barh(list(average_winrate.keys()), list(average_winrate.values()))
+        plt.barh(list(average_winrate.keys()), list(average_winrate.values()))
         plt.xlabel("Average Winrate")
         plt.ylabel("Agents")
         plt.title("Evaluation of Agent pool")
         plt.tight_layout()
         plt.savefig(os.path.join(population_path, "evaluation_against_agent_pool.svg"), dpi=300)
-        plt.close()"""
+        plt.close()
 
-
-
-        aw_dataframe =pd.DataFrame(winrate_stats)
+        aw_dataframe =pd.DataFrame(average_winrate)
         aw_dataframe.to_csv(os.path.join(population_path, "evaluation_against_agent_pool.csv"))
 
-
-def evaluate_single_agent_against_pool(
-            population_path,
-            agent_file_name,
-            num_episodes = 50
-            ):
-        
-        env = gym.envs.make("Hockey-One-v0", mode=0, weak_opponent=True)
-        base_obs_space = env.observation_space
-        base_act_space = env.action_space
-
-        env = DiscreteActionWrapperHockey(env)
-        state, info = env.reset()
-
-        n_observations = len(state)
-        n_actions = env.action_space.n
-
-        
-        opponents = [f for f in os.listdir(population_path) if f.split(".")[1] == "pth"]
-
-        assert agent_file_name in opponents
-
-        opponents.remove(agent_file_name)
-        
-        N = len(opponents)
-
-        results = []
-
-        start = time.time()
-
-        agent_config_file = agent_file_name.split(".")[0] + ".yaml"
-        agent_load_path = os.path.join(population_path, agent_file_name)
-        agent_config_path = os.path.join(population_path, agent_config_file)
-        with open(agent_config_path, "r") as f:
-                agent_config = yaml.safe_load(f) or {}
-        agent_architecture = str(agent_config.get("MODEL_IDENTIFIER", "")).strip().lower()
-
-        # ----- load agent -----
-        if agent_architecture == "rainbow":
-            agent = RainbowAgent(
-                    n_observations=n_observations,
-                    n_actions=n_actions,
-                    config_path=agent_config_path
-            )
-            agent.load_dict(agent_load_path)
-        elif agent_architecture == "ddpg":
-            agent = DDPGAgent(
-                observation_space=base_obs_space,
-                action_space=base_act_space,
-                config_path=agent_config_path
-            )
-            agent.load_dict(agent_load_path)
-        elif agent_architecture == "tdmpc2":
-            agent =  TDMPC2Agent(
-                action_space=base_act_space,
-                observation_space=base_obs_space,
-                config_path=agent_config_path
-            )
-            agent.load_dict(agent_load_path)
-        else:
-            raise NotImplementedError
-    
-        for j in range(N):
-            end = time.time()
-            print(f"eval agents for agent " + agent_file_name + f" {end-start} seconds passed")
-
-            opponent_config_file = opponents[j].split(".")[0] + ".yaml"
-
-            opponent_load_path = os.path.join(population_path, opponents[j])
-
-            opponent_config_path = os.path.join(population_path, opponent_config_file)
-
-
-            with open(opponent_config_path, "r") as f:
-                    opponent_config = yaml.safe_load(f) or {}
-
-            opponent_architecture = str(opponent_config.get("MODEL_IDENTIFIER", "")).strip().lower()
-
-            
-            # ----- load opponent -----
-            if opponent_architecture == "rainbow":
-                opponent = RainbowAgent(
-                        n_observations=n_observations,
-                        n_actions=n_actions,
-                        config_path=opponent_config_path
-                )
-                opponent.load_dict(opponent_load_path)
-            elif opponent_architecture == "ddpg":
-                opponent = DDPGAgent(
-                    observation_space=base_obs_space,
-                    action_space=base_act_space,
-                    config_path=opponent_config_path
-                )
-                opponent.load_dict(opponent_load_path)
-            elif opponent_architecture == "tdmpc2":
-                opponent =  TDMPC2Agent(
-                    action_space=base_act_space,
-                    observation_space=base_obs_space,
-                    config_path=opponent_config_path
-                )
-                opponent.load_dict(opponent_load_path)
-            else:
-                raise NotImplementedError
-
-
-            
-
-            player1_wins = agent_against_agent_eval(agent, opponent, num_episodes = num_episodes)
-            
-            results.extend(player1_wins)
-
-    
-        mean_winrate = np.mean(np.asarray(results))
-        std_winrate = np.std(np.asarray(results))
-
-        winrate_stats = dict()
-
-        winrate_stats[agent_file_name]= [mean_winrate, std_winrate]
-
-        aw_dataframe =pd.DataFrame(winrate_stats)
-        aw_dataframe.to_csv(os.path.join(population_path, f"evaluation_of {agent_file_name}.csv"))
 
 def evaluate_agents_against_basic(
             population_path,
@@ -345,9 +217,10 @@ def evaluate_agents_against_basic(
 
             agent_won_proportion = agent_against_agent_eval(agent, opponent, num_episodes = num_episodes)
             average_winrate[agents[i]] = agent_won_proportion
+            print(agent_won_proportion, f"{opponent}")
 
         
-        aw_dataframe =pd.DataFrame(average_winrate)
+        aw_dataframe =pd.DataFrame(list(average_winrate))
         aw_dataframe.to_csv(os.path.join(population_path, "evaluation_against_{opponent}.csv"))
 
         plt.barh(list(average_winrate.keys()), list(average_winrate.values()))
@@ -381,7 +254,6 @@ def agent_against_agent_eval(
                 player2 = h_env.BasicOpponent(weak=True)
 
         for _ in range(num_episodes):
-            print(_)
             d = False
             obs, info = env.reset()
             while not d:
@@ -397,11 +269,7 @@ def agent_against_agent_eval(
 
     env.close()
 
-    player1_wins = [1] * score["player1"] + [0] * score["player2"]
-    print(player1_wins)
-
-
-    return player1_wins
+    return round(score["player1"]/num_episodes, ndigits=3)
 
 
 def resolve_eval_action(player, env, obs):
@@ -430,22 +298,16 @@ def discrete_to_continuous(discrete_action):
 
 
 if __name__ == "__main__":
-
-    num_episodes = 2000
-    evaluate_single_agent_against_pool(
+    """evaluate_agents(
+          population_path="/home/stud217/hockey007/self_play_opponent_pool"
+    )"""
+    """evaluate_agents_against_basic(
           population_path="/home/stud217/hockey007/self_play_opponent_pool",
-          agent_file_name="ddpg_opponent.pth",
-          num_episodes=num_episodes
-    )
-    
-    
-    """evaluate_agents_against_basic(
-          population_path="/home/stud217/hockey007/experiments_rainbow/tdmpc",
           weak=False,
-          num_episodes=num_episodes
+          num_episodes=1000
     )"""
-    """evaluate_agents_against_basic(
-          population_path="/home/stud308/hockey007/self_play_opponent_pool",
+    evaluate_agents_against_basic(
+          population_path="/home/nils-klute/Documents/machine_learning/Reinforcement Learning/hockey007/experiments_ddpg/2026-02-26_18-35-18_ddpg weak",
           weak=True,
-          num_episodes=num_episodes
-    )"""
+          num_episodes=1000
+    )

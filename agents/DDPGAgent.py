@@ -102,7 +102,9 @@ class OUNoise:
 
 
 class DDPGAgent(Agent):
-
+    """
+    A DDPG twin delayed agent implementation based on the Agent Baseclass.
+    """
     def __init__(self, 
                  observation_space: spaces.Box, 
                  action_space: spaces.Box, 

@@ -21,10 +21,10 @@ def main ():
     parser.add_argument ( '--train_against_weak', default=False, action="store_true", help="Train against the weak opponent" )
 
     parser.add_argument ( '--playagent_1_type', type=str, default="ddpg", help = "Specify the agent 1 to use for evaluation")
-    parser.add_argument ( '--playagent1_path', type=str, default="/home/nils-klute/Documents/machine_learning/Reinforcement Learning/hockey007/experiments_ddpg/final strong/strong_opp_agent.pth", help = "Path to the trained agent 1 for evaluation")
-    parser.add_argument ( '--playagent1_config', type=str, default="/home/nils-klute/Documents/machine_learning/Reinforcement Learning/hockey007/experiments_ddpg/final strong/strong_opp_config.yaml", help = "Path to the config file for agent 1 (only for evaluation)")
+    parser.add_argument ( '--playagent1_path', type=str, default="/home/nils-klute/Documents/machine_learning/Reinforcement Learning/hockey007/experiments_ddpg/2026-02-26_18-35-18_ddpg weak/ddpg.pth", help = "Path to the trained agent 1 for evaluation")
+    parser.add_argument ( '--playagent1_config', type=str, default="/home/nils-klute/Documents/machine_learning/Reinforcement Learning/hockey007/experiments_ddpg/2026-02-26_18-35-18_ddpg weak/config.yaml", help = "Path to the config file for agent 1 (only for evaluation)")
 
-    parser.add_argument ( '--playagent_2_type', type=str, default="strongopp", help = "Specify the agent 2 to use for evaluation")
+    parser.add_argument ( '--playagent_2_type', type=str, default="weakopp", help = "Specify the agent 2 to use for evaluation")
     parser.add_argument ( '--playagent2_path', type=str, default="/home/nils-klute/Documents/machine_learning/Reinforcement Learning/hockey007/self_play_opponent_pool/tdmpc2_2026-02-21_16-43-30.pth", help = "Path to the trained agent 2 for evaluation")
     parser.add_argument ( '--playagent2_config', type=str, default="/home/nils-klute/Documents/machine_learning/Reinforcement Learning/hockey007/self_play_opponent_pool/tdmpc2_2026-02-21_16-43-30.yaml", help = "/home/nils-klute/Documents/machine_learning/Reinforcement Learning/hockey007/self_play_opponent_pool/ddpg_24_02_26_20_57.yaml")
 

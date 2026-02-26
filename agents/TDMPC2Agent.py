@@ -32,6 +32,9 @@ from agents.networks.TDMPC2Network import (
 
 
 class TDMPC2Agent(Agent):
+    """
+    A temporal difference model predictive control agent implementation based on the Agent Baseclass.
+    """
     def __init__(
             self,
             action_space,
