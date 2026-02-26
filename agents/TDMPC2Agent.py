@@ -21,7 +21,7 @@ import torch.optim as optim
 from datetime import datetime
 from agents.AgentBaseclass import Agent
 from agents.utils.TDMPC2Utils import TDMPC2ReplayBuffer
-from agents.networks.TD_MPC2_backbone import (
+from agents.networks.TDMPC2Network import (
     TDMPC2,
     Encoder, 
     DynamicsModel, 
