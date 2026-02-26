@@ -33,7 +33,7 @@ TAU: 0.005
 ACTION_NOISE_THETA: 0.15
 ACTION_NOISE_DT: 0.01
 
-# Distributional / TQC options
+# Distributional
 USE_DISTRIBUTIONAL: False
 NUM_QUANTILES: 25
 TQC_TOP_K: 5

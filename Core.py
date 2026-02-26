@@ -128,10 +128,6 @@ class Core:
                     high=env.action_space.high[:4],
                     dtype=env.action_space.dtype,
                 )
-            else:
-                raise NotImplementedError
-        else:
-            raise NotImplementedError
 
     
         if agent_name == "rainbow": 
@@ -150,10 +146,6 @@ class Core:
             )
             if agent_load_path is not None:
                 agent.load_dict(agent_load_path)
-
-        else:
-            raise NotImplementedError
-        
 
         
         train_class = Training(agent, env, base_dir, save_intermediate_agents, verbose)

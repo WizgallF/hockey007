@@ -102,9 +102,6 @@ class OUNoise:
 
 
 class DDPGAgent(Agent):
-    """
-    DDPG agent compatible with the local Agent wrapper API.
-    """
 
     def __init__(self, 
                  observation_space: spaces.Box, 
@@ -127,6 +124,7 @@ class DDPGAgent(Agent):
         self._action_n = int(self._action_space.shape[0])
         self.device = device
 
+        # Enable overwriting verbose options
         if userconfig:
             extra_keys = {key for key in userconfig.keys() if key != "verbose"}
             if extra_keys:
@@ -253,7 +251,7 @@ class DDPGAgent(Agent):
         eps: float | None = None,
     ) -> np.ndarray:
         """
-        Selects a continuous action. Accepts both (state) and (env, state, ...) call styles.
+        Selects a continuous action. With support  for vectorized states for parallel environment
         """
         if state is None:
             state = np.asarray(env, dtype=np.float32)
@@ -273,7 +271,6 @@ class DDPGAgent(Agent):
             raw_action = np.clip(raw_action, -1.0, 1.0)
             return self._scale_action_np(raw_action)
 
-        # Vectorized path for parallel environments: state shape (N, obs_dim)
         state_t = torch.tensor(state, dtype=torch.float32, device=self.device)
         with torch.no_grad():
             raw_action = self.policy(state_t).cpu().numpy()
@@ -307,7 +304,7 @@ class DDPGAgent(Agent):
             self.buffer.add_transition(transition)
             return
 
-        # Vectorized path for parallel environments
+        # Also parallelized observations
         for idx in range(state.shape[0]):
             transition = (
                 state[idx],
@@ -344,7 +341,6 @@ class DDPGAgent(Agent):
             done = torch.from_numpy(np.stack(data[:, 4])[:, None]).float().to(self.device)
 
             with torch.no_grad():
-                assert self._config["USE_TARGET_NET"], "TD3 expects target nets; re-add else if needed"
                 if self._config["USE_TARGET_NET"]:
                     next_actions = self._scale_action_torch(self.policy_target(s_prime))
                     if self._config["POLICY_NOISE"] > 0:
@@ -367,23 +363,12 @@ class DDPGAgent(Agent):
                             q_prime = torch.min(q1_prime, q2_prime)
                     else:
                         q_prime = self.Q_target.Q_value(s_prime, next_actions)
-                #else:
-                #    if self._config['TWIN_DELAYED']:
-                #        q1_prime = self.Q.Q_value(s_prime, next_actions)
-                #        q2_prime = self.Q2.Q_value(s_prime, next_actions)
-                #        q_prime = torch.min(q1_prime, q2_prime)
-                #    else:
-                #        next_actions = self._scale_action_torch(self.policy(s_prime))
-                #        q_prime = self.Q.Q_value(s_prime, next_actions)
 
                 gamma = float(self._config["DISCOUNT"])
                 td_target = rew + gamma * (1.0 - done) * q_prime
 
             critic_loss = self.Q.fit(s, a, td_target)
             last_critic_loss = critic_loss
-
-            if self._config["TWIN_DELAYED"]:
-                critic2_loss = self.Q2.fit(s, a, td_target)
 
             policy_delay = int(self._config.get("POLICY_DELAY", 2))
             if self.grad_step % policy_delay == 0:
@@ -467,34 +452,4 @@ class DDPGAgent(Agent):
     def _load_config(self, config_path: str) -> dict[str, Any]:
         with open(config_path, "r") as f:
             config = yaml.safe_load(f) or {}
-
-        required = [
-            "MODEL_IDENTIFIER",
-            "NUM_EPISODES",
-            "START_TRAINING",
-            "EPS",
-            "DISCOUNT",
-            "BUFFER_SIZE",
-            "BATCH_SIZE",
-            "TRAIN_ITERATIONS",
-            "LEARNING_RATE_ACTOR",
-            "LEARNING_RATE_CRITIC",
-            "HIDDEN_SIZES_ACTOR",
-            "HIDDEN_SIZES_CRITIC",
-            "UPDATE_TARGET_EVERY",
-            "USE_TARGET_NET",
-            "TAU",
-            "ACTION_NOISE_THETA",
-            "ACTION_NOISE_DT",
-            "TWIN_DELAYED",
-            "POLICY_NOISE",
-            "NOISE_CLIP",
-            "POLICY_DELAY",
-            "USE_DISTRIBUTIONAL",
-            "NUM_QUANTILES",
-            "TQC_TOP_K",
-        ]
-        missing = [key for key in required if key not in config]
-        if missing:
-            raise KeyError(f"Missing DDPG config keys: {', '.join(missing)}")
         return config
