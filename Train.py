@@ -125,10 +125,9 @@ class Training():
         else:
             num_envs = int(self.env.num_envs)
             agent_type = type(self.agent).__name__
-            assert agent_type in {"DDPGAgent", "TDMPC2Agent", "RainbowAgent"}, (
-                "Parallel training is only supported for DDPGAgent and TDMPC2Agent."
-            )
-            is_ddpg_vectorized = agent_type == "DDPGAgent"
+            
+            # Old flag
+            is_ddpg_vectorized = True
             ep_rew_per_env = np.zeros(num_envs, dtype=np.float32)
             state, info = self.env.reset()
             episodes_finished = 0
@@ -178,16 +177,8 @@ class Training():
                         self.statistics["ep_rew"].append(float(ep_rew_per_env[env_idx]))
                         ep_rew_per_env[env_idx] = 0.0
 
-                    # Reset only completed environments if supported
-                    if hasattr(self.env, "reset_done"):
-                        reset_obs, reset_info = self.env.reset_done()
-                        if isinstance(reset_obs, np.ndarray) and reset_obs.shape == state.shape:
-                            state = np.where(done[:, None], reset_obs, state)
-                        else:
-                            for idx, env_idx in enumerate(done_indices):
-                                state[env_idx] = reset_obs[idx]
-                    else:
-                        state, info = self.env.reset()
+                    # Reset the envs whenever one is done
+                    state, info = self.env.reset()
 
                 # ------ save best performing agent ------
                 n = len(self.statistics["ep_rew"]) 
@@ -347,7 +338,7 @@ class Training():
                 if self.verbose:
                     print(
                         f"[SelfPlay][Round {i_training_round + 1}] mode=parallel_pool "
-                        f"| parallel_envs={len(schedule)} | {self._format_parallel_composition(schedule)}"
+                        f"| parallel_envs={len(schedule)} | {self.printer_of_parralell_agents(schedule)}"
                     )
                 parallel_round_stats = self._run_self_play_parallel_round(
                     schedule,
@@ -500,13 +491,6 @@ class Training():
         pool = self._load_population_pool(population_path)
         return [item["agent"] for item in pool]
 
-    def _population_sort_key(self, fname: str) -> tuple[int, int, str]:
-        stem = os.path.splitext(fname)[0]
-        suffix = stem.rsplit("_", 1)[-1]
-        if suffix.isdigit():
-            return (0, int(suffix), fname)
-        return (1, 0, fname)
-
     def _strip_agent_training_state(self, agent):
         for attr in ("replay_buffer", "buffer", "action_noise"):
             if hasattr(agent, attr):
@@ -533,17 +517,16 @@ class Training():
         if not candidate_files:
             return pool
 
+        # I think we only need support dor the hockey env here
         base_env = h_env.HockeyEnv()
         try:
             base_obs_space = base_env.observation_space
             base_act_space = base_env.action_space
-
             if hasattr(base_obs_space, "shape") and base_obs_space.shape is not None:
                 n_observations = int(base_obs_space.shape[0])
             else:
                 state, _ = base_env.reset()
                 n_observations = len(state)
-
             try:
                 proxy_env = DiscreteActionWrapperHockey(base_env)
                 n_actions = int(proxy_env.action_space.n)
@@ -564,10 +547,7 @@ class Training():
             else:
                 single_player_action_space = base_act_space
 
-            sorted_files = sorted(
-                candidate_files,
-                key=self._population_sort_key,
-            )
+            sorted_files = sorted(candidate_files)
 
             for fname in sorted_files:
                 load_path = os.path.join(population_path, fname)
@@ -673,7 +653,10 @@ class Training():
             schedule.append(self._clone_opponent_descriptor(descriptor))
         return schedule
 
-    def _format_parallel_composition(self, schedule):
+    def printer_of_parralell_agents(self, schedule):
+        ''' 
+        AI generated function for writing to the terminal (Codex 5.3)
+        '''
         if not schedule:
             return "composition=none"
 
@@ -684,6 +667,9 @@ class Training():
         return f"composition_by_id: {id_part} | composition_by_kind: {kind_part}"
 
     def _format_per_opponent_winrates(self, opponent_stats):
+        ''' 
+        AI generated function for writing to the terminal (Codex 5.3)
+        '''
         if not opponent_stats:
             return "per_opp_winrate=none"
 
@@ -696,6 +682,9 @@ class Training():
         return "per_opp_winrate: " + ", ".join(parts)
 
     def _log_parallel_round_summary(self, i_training_round, opponent_stats):
+        ''' 
+        AI generated function for writing to the terminal (Codex 5.3)
+        '''
         if not opponent_stats:
             return
 
@@ -734,6 +723,9 @@ class Training():
             i_training_round,
             start,
             population_path):
+        """
+        AI assisted function but designed by Team (Codex 5.3)
+        """
         envs = [Envwrapper(h_env.HockeyEnv(), player2=descriptor["agent"], discrete_actions=discrete_actions) for descriptor in schedule]
         num_envs = len(envs)
         target_episodes = self.agent.NUM_EPISODES * num_envs
@@ -906,9 +898,6 @@ class Training():
 
         print(results)
         return results
-
-
-        # TODO: make population path self argument
 
     def _agent_against_pool_eval(
         self,
