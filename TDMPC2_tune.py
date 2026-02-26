@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 """
-TDMPC2_tune.py
-
-WandB-based grid tuning for TD-MPC2. You can specify a grid with min/max values
-and the best configuration will be saved as a YAML in the experiments folder.
-The YAML is updated every time a new best score is found, so you keep the latest
-best parameters even if the tuning run is interrupted.
+This code was patially written/debugged with AI assistance regarding overrides, wandb logic and problems with self play
 """
 
 from __future__ import annotations
@@ -93,8 +88,7 @@ def _resolved_params_for_yaml(
     env_name: str,
     self_play: bool,
 ) -> Dict[str, Any]:
-    # Start from full agent config (config file defaults + sweep overrides),
-    # then layer in any explicit runtime meta-params.
+    
     params = dict(getattr(agent, "configs", {}) or {})
     params.update(run_cfg)
     params["num_parallel_envs"] = int(num_parallel_envs)
@@ -322,7 +316,6 @@ def _run_training_once(
             raise NotADirectoryError(f"Self-play opponent pool is not a directory: {p}")
         self_play_population_path = str(p)
         run_cfg["self_play_population_path"] = self_play_population_path
-        # If an external pool is provided, fixed-opponent sampling should be enabled.
         run_cfg["FIXED_OPPONENTS"] = True
 
     if args.self_play:
@@ -353,6 +346,7 @@ def _run_training_once(
                     population_path=self_play_population_path,
                     num_parallel_envs=num_parallel_envs,
                 )
+                trainer.save_data()
             except KeyboardInterrupt:
                 if not allow_partial_on_interrupt:
                     raise
@@ -388,6 +382,7 @@ def _run_training_once(
         interrupted = False
         try:
             trainer.train()
+            trainer.save_data()
         except KeyboardInterrupt:
             if not allow_partial_on_interrupt:
                 raise
@@ -550,10 +545,9 @@ def _build_agent(action_space, observation_space, cfg_dict: Dict[str, Any]):
             config_overrides=cfg_dict,
         )
 
-    # Fallback for older TDMPC2Agent versions (no config_overrides)
     agent = TDMPC2Agent(action_space, observation_space)
 
-    # Disallow model-shape changes without full re-init
+    
     incompatible = {"Z_DIM", "HIDDEN_DIM"}
     if any(k in cfg_dict for k in incompatible):
         raise RuntimeError(
@@ -571,13 +565,13 @@ def _apply_overrides_compat(agent: Any, cfg_dict: Dict[str, Any]) -> None:
         agent.configs.update(cfg_dict)
     agent.__dict__.update(cfg_dict)
 
-    # Update horizon-dependent buffers if needed
+    
     if "TRAIN_HORIZON" in cfg_dict or "HORIZON" in cfg_dict:
         agent.TRAIN_HORIZON = getattr(agent, "TRAIN_HORIZON", cfg_dict.get("TRAIN_HORIZON", 12))
         agent.horizon = cfg_dict.get("HORIZON", agent.TRAIN_HORIZON)
         agent._a_mean = torch.zeros(agent.horizon, agent.act_dim, device=agent.device)
 
-    # Recreate optimizers if optimizer settings were overridden
+    
     optimizer_keys = {
         "OPTIMIZER",
         "LR",
@@ -607,7 +601,6 @@ def _apply_overrides_compat(agent: Any, cfg_dict: Dict[str, Any]) -> None:
         if hasattr(agent, "_reset_optimizers"):
             agent._reset_optimizers()
         else:
-            # Backward-compatible fallback to Adam
             agent.optimizer = optim.Adam(
                 agent.model.parameters(),
                 lr=agent.LR,
@@ -616,7 +609,6 @@ def _apply_overrides_compat(agent: Any, cfg_dict: Dict[str, Any]) -> None:
             )
             agent.pi_optimizer = optim.Adam(agent.model.pi.parameters(), lr=agent.PI_LR)
 
-    # Recreate replay buffer if its construction params were overridden
     if any(k in cfg_dict for k in ("CAPACITY", "PRIORITIZED", "ALPHA", "BETA", "EPSILON", "SEED")):
         agent.CAPACITY = cfg_dict.get("CAPACITY", agent.CAPACITY)
         agent.PRIORITIZED = cfg_dict.get("PRIORITIZED", agent.PRIORITIZED)
@@ -783,7 +775,6 @@ def run_sweep_once(args: argparse.Namespace) -> int:
 def main() -> int:
     args = parse_args()
 
-    # Ensure relative paths (like configs/tdmpc_config.yaml) resolve from repo root
     repo_root = Path(__file__).resolve().parent
     os.chdir(repo_root)
 
