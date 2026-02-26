@@ -20,6 +20,9 @@ from collections import Counter
 
 
 class Training():
+    """
+    Training functionality for the implemented agents. Management of single opponent and pool training.
+    """
     def __init__(
         self,
         agent = None,
@@ -30,6 +33,18 @@ class Training():
         weak=True,
         env_name = "Pendulum-v1"
         ):
+        """
+        Initialization of the Training Class
+        ----------
+        Parameters:
+            agent: The agent instance that gets trained
+            env: The environment the agent trains in
+            base_dir: The relative folder for experiment saving
+            verbose: Control the verbosity of the training
+            weak: whether to train on the weak of strong opponent if Hockey Environment is chosen
+            env_name: The environment name (used for plotting)
+
+        """
         
         self.statistics = {
             "ep_rew": [0.0],
@@ -55,6 +70,9 @@ class Training():
 
     
     def train(self):
+        """
+        Training of an agent in a fixed environment.
+        """
         
         torch.set_default_dtype(torch.float32)
 
@@ -207,6 +225,10 @@ class Training():
             self.save_q_values()
     
     def save_data(self, mean_eval_score = 0):
+        """
+        Save general training data. Includes loss and episode rewards.
+
+        """
 
         # ------ create reward plot -------
         mavg_data = np.array(self.statistics["mv_avg_rew"])
@@ -243,6 +265,9 @@ class Training():
         np.save(os.path.join(self.experiment_path, f"training_losses_data-{self.agent.MODEL_IDENTIFIER}.npy"), np.array(self.statistics["tr_loss"]))
 
     def save_q_values(self):
+        """
+        Save Q Values in case a valued based method is used.
+        """
         # ------ create q-value plot ------
         plt.figure(figsize=(8, 6), dpi=300)
         plt.plot(np.array(self.statistics["mean_q"]), label="Mean Q", color="blue", linewidth=1.5)
@@ -261,11 +286,17 @@ class Training():
     
     def train_self_play(
             self, 
-            opponent,
             discrete_actions = False,
-            agent_load_path = None,
             population_path = None,
             num_parallel_envs: int = 1):
+        """
+        Training in opponent pool mode.
+        ----------
+        Parameters:
+            discrete_actions: Whether discrete actions are used
+            population_path: The population path where the opponent pool is
+            num_parallel_envs: The number of parallel environments to use
+        """
 
         torch.set_default_dtype(torch.float32)
 
@@ -420,6 +451,13 @@ class Training():
             self,
             i_training_round,
             start):
+        """
+        Train a single self play training round without parallel environments.
+        ----------
+        Parameters:
+            i_training_round: the current training round
+            start: The time the training startet
+        """
         
         for i_episode in range(self.agent.NUM_EPISODES):
             self.agent.cur_episode = i_episode
@@ -488,6 +526,12 @@ class Training():
     def _load_population_opponents(
             self,
             population_path):
+        """
+        Loading the opponents from the population pool
+        ----------
+        Parameters:
+            population_path: The path where the opponents are loaded from
+        """
         pool = self._load_population_pool(population_path)
         return [item["agent"] for item in pool]
 
@@ -622,6 +666,9 @@ class Training():
         }
 
     def _clone_opponent_descriptor(self, descriptor):
+        ''' 
+        AI generated function for writing to the terminal (Codex 5.3)
+        '''
         if descriptor["kind"] in {"basic_weak", "basic_strong"}:
             return self._make_basic_opponent_descriptor(weak=descriptor["kind"] == "basic_weak")
 
@@ -724,6 +771,15 @@ class Training():
             start,
             population_path):
         """
+        Train a single self play training round with parallel environments.
+        ----------
+        Parameters:
+            schedule: Used for logging
+            discrete_actions: Whether discrete actions are used
+            i_training_round: the current training round
+            start: The time the training startet
+            population_path: The path where  opponents are located
+        
         AI assisted function but designed by Team (Codex 5.3)
         """
         envs = [Envwrapper(h_env.HockeyEnv(), player2=descriptor["agent"], discrete_actions=discrete_actions) for descriptor in schedule]
@@ -873,6 +929,13 @@ class Training():
     def evaluate_agents(
             self,
             population_path):
+        """
+        Evaluate all agents against each other. For self play without fixed opponents, this evaluates
+        performance of all agents.
+        ----------
+        Parameters:
+            population_path: The path where saved agents are located
+        """
         
         N = len(os.listdir(population_path))
 
@@ -904,6 +967,14 @@ class Training():
         player1, 
         opponents,
         num_episodes = 50):
+        """
+        Evaluate performance of agent against opponents in the pool. For self play without fixed opponents.
+        ----------
+        Parameters:
+            player1: The agent to be evaluated
+            opponents: The opponents to evaluate against
+            num_episodes: The number of episodes to evaluate on.
+        """
     
         winrates = []
         for opponent in opponents:
@@ -926,6 +997,15 @@ class Training():
             player2= "basicopp",
             environment = 'Hockey-One-v0',
             num_episodes = 50):
+        """
+        Single round of evaluation for two agents
+        ----------
+        Parameters:
+            player1: The first agent
+            opponents: The second agent
+            environment: The environment to use (always Hockey-One-v0)
+            num_episodes: The number of episodes to evaluate on.
+        """
         
         if environment == 'Hockey-One-v0':
             env = h_env.HockeyEnv()
@@ -957,6 +1037,15 @@ class Training():
             weak=True,
             environment = 'Hockey-One-v0',
             num_episodes = 50):
+        """
+        Single round of evaluation for an agent against the basic opponents
+        ----------
+        Parameters:
+            player1: The agent
+            weak: The mode of the basic opponent (strong vs weak)
+            environment: The environment to use (always Hockey-One-v0)
+            num_episodes: The number of episodes to evaluate on.
+        """
         
         if environment == 'Hockey-One-v0':
             env = h_env.HockeyEnv()
@@ -987,6 +1076,14 @@ class Training():
         return score["player1"]/num_episodes
     
     def _resolve_eval_action(self, player, env, obs):
+        """
+        Resolve the action of an agent (custom or basic)
+        ----------
+        Parameters:
+            player: The agent
+            env: The environment
+            obs: The observation
+        """
         if isinstance(player, RainbowAgent):
             discrete_action = player.act(env=env, state=obs, greedy=True)
             return self._discrete_to_continuous(discrete_action)
@@ -995,6 +1092,10 @@ class Training():
         return player.act(obs)
     
     def _latest_self_play_stats(self):
+        """
+        Used for logging.
+        AI assisted function but designed by Team (Codex 5.3)
+        """
         episodes_seen = max(0, len(self.statistics["ep_rew"]) - 1)
         parts = [f"episodes_seen={episodes_seen}", f"opponents_in_pool={self.population_size}"]
 
@@ -1009,6 +1110,9 @@ class Training():
         return " | ".join(parts)
     
     def save_performance_against_basic_opp(self):
+        """
+        Plot performance against the basic opponents
+        """
         # ------ create performance_against_basic_opp plot ------
         plt.figure(figsize=(8, 6), dpi=300)
         plt.plot(np.array(self.agent_against_basic_opp ), label="Mean Q", color="blue", linewidth=1.5)
@@ -1045,6 +1149,13 @@ class Training():
             self,
             population_path,
             i_training_round):
+        """
+        Save an agent to the population pool
+        ----------
+        Parameters:
+            population_path: The population path where agents get saved
+            i_training_round: The current training round
+        """
 
         os.makedirs(population_path, exist_ok=True)
         save_index = self.population_size
@@ -1060,6 +1171,12 @@ class Training():
     def select_from_population(
             self,
             population_path):
+        """
+        Select an opponent from the pool
+        ----------
+        Parameters:
+            population_path: The population path where agents get saved
+        """
         
         if not self.fixed_opponents:
             p = random.random()
@@ -1106,33 +1223,41 @@ class Training():
 
 
     def save_performance_against_fixed_pool(self):
-            self.all_winrates_vs_pool = np.vstack(self.all_winrates_vs_pool)
-
-
-            N = self.all_winrates_vs_pool.shape[1]
-            colors = plt.cm.viridis(np.linspace(0, 1, N))
-
-            for i in range(N):
-                all_winrates_vs_i = self.all_winrates_vs_pool[:, i]
-                plt.plot(all_winrates_vs_i, label=f"{self.fixed_opponents_labels[i]}", color=colors[i], linewidth=1.5)
+        """
+        Save performance of a single agent against a fixed pool
+        """
             
-            plt.xlabel("Evaluation intervalls")
-            plt.ylabel("Average Agent Winrate vs Opponents")
-            plt.title("Performance against Fixed Opponent pool")
-            plt.legend()
-            plt.savefig(os.path.join(self.experiment_path, f"opponent_pool_performance-{self.agent.MODEL_IDENTIFIER}.png"), dpi=300)
-            plt.close()
+        self.all_winrates_vs_pool = np.vstack(self.all_winrates_vs_pool)
+
+
+        N = self.all_winrates_vs_pool.shape[1]
+        colors = plt.cm.viridis(np.linspace(0, 1, N))
+
+        for i in range(N):
+            all_winrates_vs_i = self.all_winrates_vs_pool[:, i]
+            plt.plot(all_winrates_vs_i, label=f"{self.fixed_opponents_labels[i]}", color=colors[i], linewidth=1.5)
+        
+        plt.xlabel("Evaluation intervalls")
+        plt.ylabel("Average Agent Winrate vs Opponents")
+        plt.title("Performance against Fixed Opponent pool")
+        plt.legend()
+        plt.savefig(os.path.join(self.experiment_path, f"opponent_pool_performance-{self.agent.MODEL_IDENTIFIER}.png"), dpi=300)
+        plt.close()
 
 
 
 
     def exploit_agent(
             self, 
-            opponent,
             discrete_actions = False,
-            agent_load_path = None,
-            population_path = None,
             num_parallel_envs: int = 1):
+        """
+        Experimental code for exploiting an existing agents action.
+        ---------
+        Parameters:
+            discrete_actions: Whether discrete actions are used
+            num_parallel_envs: The number of parallel environments to use
+        """
 
         torch.set_default_dtype(torch.float32)
 
@@ -1151,40 +1276,11 @@ class Training():
 
 
         start = time.time()
-        best_mv_avg_reward = float('-inf')
         self.winrate_vs_opponent = None
         self.all_winrates_vs_opponent = []
 
-
-        parallel_round_stats = None
-        
-
-        # Wrap environment with Player 2
-
         if use_parallel_mode:
-            pass
-            """if not hasattr(self, "best_parallel_pool_avg_winrate"):
-                self.best_parallel_pool_avg_winrate = float("-inf")
-            schedule = self._build_parallel_opponent_schedule(
-                num_envs=int(num_parallel_envs),
-                population_path=population_path,
-            )
-            if self.verbose:
-                print(
-                    f"[SelfPlay][Round {i_training_round + 1}] mode=parallel_pool "
-                    f"| parallel_envs={len(schedule)} | {self._format_parallel_composition(schedule)}"
-                )
-            parallel_round_stats = self._run_self_play_parallel_round(
-                schedule,
-                discrete_actions,
-                i_training_round,
-                start,
-                population_path,
-            )
-            if self.verbose:
-                self._log_parallel_round_summary(i_training_round, parallel_round_stats)
-
-"""
+            NotImplemented
         else:
             
             self.env = Envwrapper(self.original_env, self.opponent, discrete_actions)
@@ -1259,6 +1355,9 @@ class Training():
             self.save_q_values()
 
     def save_winrate_against_opponent(self):
+        """
+        Save the winrate against an opponent for experimental exploit code
+        """
         # ------ create winrate_against_opponent plot ------
         plt.figure(figsize=(8, 6), dpi=300)
         plt.plot(np.array(self.all_winrates_vs_opponent), color="red", linewidth=1.5)
