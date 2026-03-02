@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 """
-DDPG_tune.py
-
-WandB-based sweep runner for DDPG without modifying main.py or Train.py.
-Builds a merged config per run, trains via Training, and logs a summary score.
+This script was made with AI assistance (Codex 5.3) but all the design choices and final code are human made.
 """
 
 from __future__ import annotations

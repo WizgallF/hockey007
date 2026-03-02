@@ -24,8 +24,8 @@ class Memory():
         if self.size == 0 or batch == 0:
             return self.transitions[0:0]
 
-        # For large buffers, sampling without replacement becomes expensive.
-        # Use fast sampling with replacement to keep update time stable.
+        # For large buffers, sampling without replacement becomes expensive (somehow?).
+        # Fast sampling with replacement to keep update time stable.
         if self.size >= self.fast_sample_threshold and batch < self.size:
             inds = self.rng.integers(0, self.size, size=batch)
         else:

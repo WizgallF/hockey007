@@ -18,6 +18,9 @@ from agents.utils.RainbowUtils import ReplayBuffer, LinearSchedule
 torch.set_num_threads(1)
 
 class RainbowAgent(Agent):
+    """
+    A Rainbow Q-Learning agent implementation based on the Agent Baseclass.
+    """
     def __init__(
             self,
             n_observations: int,

@@ -1,3 +1,7 @@
+"""
+AI assisntence was used to set up batched infernce, to debug the epistemic uncertainty add on and to wire in Muon
+"""
+
 from dataclasses import dataclass, field
 import importlib
 import inspect
@@ -17,7 +21,7 @@ import torch.optim as optim
 from datetime import datetime
 from agents.AgentBaseclass import Agent
 from agents.utils.TDMPC2Utils import TDMPC2ReplayBuffer
-from agents.networks.TD_MPC2_backbone import (
+from agents.networks.TDMPC2Network import (
     TDMPC2,
     Encoder, 
     DynamicsModel, 
@@ -28,6 +32,9 @@ from agents.networks.TD_MPC2_backbone import (
 
 
 class TDMPC2Agent(Agent):
+    """
+    A temporal difference model predictive control agent implementation based on the Agent Baseclass.
+    """
     def __init__(
             self,
             action_space,
@@ -37,7 +44,7 @@ class TDMPC2Agent(Agent):
             config_path = None
             ):
 
-        # ------ load configs from "tdmpc_config.yaml" ------
+        # ------ load configs from ------
         repo_root = Path(__file__).resolve().parent.parent
         if not config_path:
             config_path = repo_root / "configs" / "tdmpc_config.yaml"
@@ -288,7 +295,7 @@ class TDMPC2Agent(Agent):
         matrix_params = [p for p in params if p.ndim >= 2]
         aux_params = [p for p in params if p.ndim < 2]
 
-        # Muon requires at least one matrix-shaped parameter group.
+        
         if len(matrix_params) == 0:
             return self._build_adam_optimizer(params, lr=adam_lr, weight_decay=adam_weight_decay)
 
@@ -360,9 +367,30 @@ class TDMPC2Agent(Agent):
         )
 
     def _standardize(self, x: torch.Tensor) -> torch.Tensor:
+        if x.ndim == 2:
+            mean = x.mean(dim=1, keepdim=True)
+            std = x.std(dim=1, unbiased=False, keepdim=True)
+            return (x - mean) / (std + 1e-6)
         mean = x.mean()
         std = x.std(unbiased=False)
         return (x - mean) / (std + 1e-6)
+
+    def _get_batched_action_mean(self, batch_size: int) -> torch.Tensor:
+        """
+        Returns a batched warm-start tensor of shape [B, H, act_dim].
+        Supports both legacy single-env and batched internal storage.
+        """
+        if self._a_mean.ndim == 2:
+            return self._a_mean.unsqueeze(0).expand(batch_size, -1, -1).clone()
+        if self._a_mean.ndim == 3:
+            if self._a_mean.shape[0] == batch_size:
+                return self._a_mean.clone()
+            if self._a_mean.shape[0] == 1:
+                return self._a_mean.expand(batch_size, -1, -1).clone()
+            return self._a_mean[0:1].expand(batch_size, -1, -1).clone()
+        raise RuntimeError(
+            f"Unexpected _a_mean shape {tuple(self._a_mean.shape)}; expected [H,A] or [B,H,A]."
+        )
 
     def _epistemic_uncertainty(
         self,
@@ -375,7 +403,28 @@ class TDMPC2Agent(Agent):
         """
         Estimates trajectory-level epistemic uncertainty for MPC scoring.
         """
-        N, H, _ = a_seq.shape
+        squeeze_batch = False
+        if a_seq.ndim == 3:
+            a_seq = a_seq.unsqueeze(0)
+            zs = zs.unsqueeze(0)
+            rs = rs.unsqueeze(0)
+            squeeze_batch = True
+        elif a_seq.ndim != 4:
+            raise ValueError(
+                f"Expected a_seq with shape [N,H,A] or [B,N,H,A], got {tuple(a_seq.shape)}."
+            )
+
+        if obs.ndim == 1:
+            obs = obs.unsqueeze(0)
+
+        if discounts.ndim == 2:
+            discounts = discounts.unsqueeze(0)  # [1,1,H]
+        elif discounts.ndim != 3:
+            raise ValueError(
+                f"Expected discounts with shape [1,H] or [1,1,H], got {tuple(discounts.shape)}."
+            )
+
+        B, N, H, _ = a_seq.shape
         method = self.EPISTEMIC_METHOD
         use_q = method in {"q", "q_disagreement", "combined", "both"}
         use_ens = method in {"ensemble"}
@@ -387,48 +436,52 @@ class TDMPC2Agent(Agent):
 
         if use_q:
             q1, q2 = self.model.q(
-                zs[:, :-1, :].reshape(N * H, -1),
-                a_seq.reshape(N * H, -1),
+                zs[:, :, :-1, :].reshape(B * N * H, -1),
+                a_seq.reshape(B * N * H, -1),
             )
-            q_disc = (q1 - q2).abs().view(N, H)
-            q_unc = (q_disc * discounts).sum(dim=1)
+            q_disc = (q1 - q2).abs().view(B, N, H)
+            q_unc = (q_disc * discounts).sum(dim=2)
             terms.append(q_unc)
 
         if use_ens:
-            # Ensemble epistemic as variance of model-wise trajectory means:
-            # 1) per-head Q predictions along the rollout
-            # 2) discounted mean across horizon for each head
-            # 3) variance across heads -> one scalar uncertainty per trajectory
             q_all = self._q_all(
                 self.model.q,
-                zs[:, :-1, :].reshape(N * H, -1),
-                a_seq.reshape(N * H, -1),
-            ).view(self._q_ensemble_size(self.model.q), N, H)  # [E,N,H]
-            disc = discounts.view(1, 1, H)
+                zs[:, :, :-1, :].reshape(B * N * H, -1),
+                a_seq.reshape(B * N * H, -1),
+            ).view(self._q_ensemble_size(self.model.q), B, N, H)  # [E,B,N,H]
+            disc = discounts.view(1, 1, 1, H)
             disc_w = disc / (disc.sum(dim=-1, keepdim=True) + 1e-8)
-            q_head_mean = (q_all * disc_w).sum(dim=-1)  # [E,N]
-            ens_unc = q_head_mean.var(dim=0, unbiased=False)  # [N]
+            q_head_mean = (q_all * disc_w).sum(dim=-1)  # [E,B,N]
+            ens_unc = q_head_mean.var(dim=0, unbiased=False)  # [B,N]
             terms.append(ens_unc)
 
         if use_model:
-            z0_targ = self.target_model.encoder(obs).repeat(N, 1)
-            zs_targ, rs_targ = self.target_model.rollout(z0_targ, a_seq)
+            z0_targ = self.target_model.encoder(obs)  # [B,z]
+            z0_targ_rep = z0_targ.unsqueeze(1).expand(B, N, -1).reshape(B * N, -1)
+            zs_targ, rs_targ = self.target_model.rollout(
+                z0_targ_rep,
+                a_seq.reshape(B * N, H, -1),
+            )
+            zs_targ = zs_targ.view(B, N, H + 1, -1)
+            rs_targ = rs_targ.view(B, N, H)
 
-            z_disc = (zs[:, 1:, :] - zs_targ[:, 1:, :]).pow(2).mean(dim=-1)
+            z_disc = (zs[:, :, 1:, :] - zs_targ[:, :, 1:, :]).pow(2).mean(dim=-1)
             r_disc = (rs - rs_targ).pow(2)
 
-            z_unc = (z_disc * discounts).sum(dim=1)
-            r_unc = (r_disc * discounts).sum(dim=1)
+            z_unc = (z_disc * discounts).sum(dim=2)
+            r_unc = (r_disc * discounts).sum(dim=2)
             model_unc = torch.sqrt(z_unc + r_unc + 1e-8)
             terms.append(model_unc)
 
         if len(terms) == 0:
-            return torch.zeros(N, device=self.device)
+            zeros = torch.zeros(B, N, device=self.device)
+            return zeros.squeeze(0) if squeeze_batch else zeros
 
         if self.EPISTEMIC_NORMALIZE:
             terms = [self._standardize(t) for t in terms]
 
-        return torch.stack(terms, dim=0).mean(dim=0)
+        out = torch.stack(terms, dim=0).mean(dim=0)
+        return out.squeeze(0) if squeeze_batch else out
 
     @torch.no_grad()
     def act(
@@ -445,54 +498,64 @@ class TDMPC2Agent(Agent):
             if env is None:
                 raise ValueError("TDMPC2Agent.act requires either `state` or `env` as state input.")
             state = env
-        obs = torch.as_tensor(state, dtype=torch.float32, device=self.device).view(1, -1)
+        obs = torch.as_tensor(state, dtype=torch.float32, device=self.device)
+        if obs.ndim == 1:
+            obs = obs.unsqueeze(0)
+        elif obs.ndim != 2:
+            raise ValueError(
+                f"TDMPC2Agent.act expects state with shape [obs_dim] or [B,obs_dim], got {tuple(obs.shape)}."
+            )
 
         # --- 1) encode ---
-        z0 = self.model.encoder(obs)  # [1, z_dim]
+        z0 = self.model.encoder(obs)  # [B, z_dim]
+        B = int(z0.shape[0])
 
         H = self.horizon
         N = self.MPC_SAMPLES
         iters = self.MPC_ITERS
         act_dim = self.act_dim
 
-        # Helper: map [-1,1] -> env bounds (if present)
+        
         def unnormalize(a_tanh):
             return self._unnormalize_action(a_tanh)
 
-        # Helper: discount vector [H]
-        discounts = (self.GAMMA ** torch.arange(H, device=self.device, dtype=torch.float32)).view(1, H)
+        
+        discounts = (self.GAMMA ** torch.arange(H, device=self.device, dtype=torch.float32)).view(1, 1, H)
 
-        # --- 2) MPPI: iterative refinement of mean action sequence ---
-        mean = self._a_mean.clone()  # [H, act_dim]
+        # --- MPPI: iterative refnimment of mean action sequence ---
+        mean = self._get_batched_action_mean(B)  
         sigma = self.MPC_SIGMA
         beta = self._current_epistemic_beta()
         last_uncertainty = None
 
         for _ in range(iters):
-            # sample around mean: [N, H, act_dim]
-            noise = torch.randn(N, H, act_dim, device=self.device) * sigma
-            a_seq = mean.unsqueeze(0) + noise
+           
+            noise = torch.randn(B, N, H, act_dim, device=self.device) * sigma
+            a_seq = mean.unsqueeze(1) + noise
             a_seq = torch.clamp(a_seq, -1.0, 1.0)
 
             # optional: inject some policy-prior sequences to help early training
-            # e.g., replace first K with pi(z) repeated (simple warm-start)
+            # e.g., replace first K with pi(z) repeated (sipmle warm-start)
             K = min(32, N)
             if K > 0:
-                a0 = self.model.pi(z0).repeat(K, 1)  # [K, act_dim], tanh already
-                a_seq[:K, 0, :] = a0
+                a0 = self.model.pi(z0)  # [B,act_dim], tanh already
+                a_seq[:, :K, 0, :] = a0.unsqueeze(1).expand(B, K, act_dim)
 
             # rollout: requires z0 [B,z_dim] and action_seq [B,H,act_dim]
-            z0_rep = z0.repeat(N, 1)
-            zs, rs = self.model.rollout(z0_rep, a_seq)  # zs: [N,H+1,z_dim], rs: [N,H]
+            z0_rep = z0.unsqueeze(1).expand(B, N, -1).reshape(B * N, -1)
+            a_seq_flat = a_seq.reshape(B * N, H, act_dim)
+            zs_flat, rs_flat = self.model.rollout(z0_rep, a_seq_flat)
+            zs = zs_flat.view(B, N, H + 1, -1)
+            rs = rs_flat.view(B, N, H)
 
             # terminal value: V ≈ min(Q(z_H, pi(z_H)))
-            zH = zs[:, -1, :]                    # [N,z_dim]
-            aH = self.model.pi(zH)               # [N,act_dim]
-            vH = self.model.q.min(zH, aH)        # [N]
+            zH = zs[:, :, -1, :].reshape(B * N, -1) 
+            aH = self.model.pi(zH)                  
+            vH = self.model.q.min(zH, aH).view(B, N) 
 
-            # total score: discounted sum of rewards + discounted terminal value
-            # rs: [N,H]
-            returns = (rs * discounts).sum(dim=1) + (self.GAMMA ** H) * vH  # [N]
+            
+            
+            returns = (rs * discounts).sum(dim=2) + (self.GAMMA ** H) * vH  # [B,N]
             planning_score = returns
 
             if beta > 0.0:
@@ -506,32 +569,37 @@ class TDMPC2Agent(Agent):
                 planning_score = planning_score + beta * uncertainty
                 last_uncertainty = uncertainty
 
-            # MPPI weights (softmax over returns)
-            # stabilize by subtracting max
-            scaled = (planning_score - planning_score.max()) / max(self.MPC_TEMP, 1e-6)
-            w = torch.softmax(scaled, dim=0)  # [N]
+            
+            scaled = (
+                planning_score - planning_score.max(dim=1, keepdim=True).values
+            ) / max(self.MPC_TEMP, 1e-6)
+            w = torch.softmax(scaled, dim=1)  # [B,N]
 
-            # update mean: weighted average of sampled sequences
-            mean = (w.view(N, 1, 1) * a_seq).sum(dim=0)  # [H,act_dim]
+            
+            mean = (w.view(B, N, 1, 1) * a_seq).sum(dim=1)  
 
-        # --- 3) pick action: first action of planned mean ---
-        a = mean[0]  # [-1,1] range
+        # --- pick action: first action of planned mean ---
+        a = mean[:, 0, :]  # [-1,1] range
 
-        # --- 4) exploration noise on executed action (optional) ---
+        # --- exploration noise on executed action (optional) ---
         if self.EXPL_NOISE > 0 and self.model.training is False and not greedy:
             # use a simple schedule if you want: decay with episode_i or self.t
             a = torch.clamp(a + self.EXPL_NOISE * torch.randn_like(a), -1.0, 1.0)
 
-        # --- 5) warm-start for next call: shift mean ---
-        mean_shifted = torch.roll(mean, shifts=-1, dims=0)
-        mean_shifted[-1].zero_()  # or keep last action, or sample from pi(z) later
-        self._a_mean = mean_shifted.detach()
+        # --- warm-start for next call: shift mean ---
+        mean_shifted = torch.roll(mean, shifts=-1, dims=1)
+        mean_shifted[:, -1, :].zero_()  # or keep last action, or sample from pi(z) later
+        self._a_mean = mean_shifted.detach() if B > 1 else mean_shifted[0].detach()
 
-        # --- 6) convert to env action scale and return ---
+        # --- convert to env action scale and return ---
         a_env = unnormalize(a).cpu().numpy()
-        if self._action_shape is not None and self._action_low is not None:
-            a_env = a_env.reshape(self._action_shape)
-        self.t += 1
+        if B == 1:
+            a_env = a_env[0]
+            if self._action_shape is not None and self._action_low is not None:
+                a_env = a_env.reshape(self._action_shape)
+        elif self._action_shape is not None and self._action_low is not None:
+            a_env = a_env.reshape((B,) + tuple(self._action_shape))
+        self.t += B
 
         if statistics is not None:
             if "epistemic_beta" in statistics:
@@ -589,23 +657,23 @@ class TDMPC2Agent(Agent):
         )
 
         # ---- to torch ----
-        obs = torch.as_tensor(obs, dtype=torch.float32, device=self.device)          # [B,H+1,obs_dim]
-        act = torch.as_tensor(act, dtype=torch.float32, device=self.device)          # [B,H,act_dim]
-        rew = torch.as_tensor(rew, dtype=torch.float32, device=self.device)          # [B,H]
-        done = torch.as_tensor(done, dtype=torch.float32, device=self.device)        # [B,H] (0/1)
-        isw = torch.as_tensor(isw, dtype=torch.float32, device=self.device)          # [B]
+        obs = torch.as_tensor(obs, dtype=torch.float32, device=self.device)          
+        act = torch.as_tensor(act, dtype=torch.float32, device=self.device)        
+        rew = torch.as_tensor(rew, dtype=torch.float32, device=self.device)
+        done = torch.as_tensor(done, dtype=torch.float32, device=self.device)    
+        isw = torch.as_tensor(isw, dtype=torch.float32, device=self.device)         
 
         not_done = 1.0 - done
 
         # Time weights (TD-MPC2 uses a decay across horizon; call it lambda_w here)
-        t_w = (self.LAMBDA_W ** torch.arange(H, device=self.device, dtype=torch.float32))  # [H]
+        t_w = (self.LAMBDA_W ** torch.arange(H, device=self.device, dtype=torch.float32))  
         t_w = t_w.view(1, H)  # broadcast to [B,H]
 
         # ---- encode all observations ----
         # z_seq: [B,H+1,z_dim]
         z_seq = self.model.encoder(obs.view(B*(H+1), -1)).view(B, H+1, -1)
-        z = z_seq[:, :-1, :]      # [B,H,z]
-        z_next_targ = z_seq[:, 1:, :].detach()  # stop-grad target [B,H,z]
+        z = z_seq[:, :-1, :]      
+        z_next_targ = z_seq[:, 1:, :].detach() 
 
         # ---- predict next z via dynamics ----
         z_pred = self.model.dynamics(
@@ -613,7 +681,7 @@ class TDMPC2Agent(Agent):
             act.reshape(B*H, -1)
         ).view(B, H, -1)
 
-        # ---- representation / dynamics consistency loss ----
+        # ---- representation loss ----
         rep_loss_t = F.mse_loss(z_pred, z_next_targ, reduction="none").mean(dim=-1)  # [B,H]
 
         # ---- reward prediction loss ----
@@ -630,7 +698,6 @@ class TDMPC2Agent(Agent):
 
         # ---- TD target using target networks ----
         with torch.no_grad():
-            # next action from target policy prior
             a_next = self.target_model.pi(z_next_targ.reshape(B*H, -1)).view(B, H, -1)
             # target min over ensemble Q
             tq = self.target_model.q.min(
@@ -645,7 +712,7 @@ class TDMPC2Agent(Agent):
             reduction="none",
         ).mean(dim=0)  # [B,H]
 
-        # ---- aggregate per-sample loss (PER weights apply per sample) ----
+        # ---- aggregate per-sample loss ----
         per_sample = (t_w * (rep_loss_t + rew_loss_t + q_loss_t)).mean(dim=1)  # [B]
         loss_model = (isw * per_sample).mean()
 
@@ -656,11 +723,10 @@ class TDMPC2Agent(Agent):
         self.optimizer.step()
 
         # ---- policy prior update (maximize Q at encoded states) ----
-        # Keep it simple and stable: maximize Q(z, pi(z)) on sampled latents.
-        z_detached = z.detach()  # don't push gradients into encoder from policy loss
+        z_detached = z.detach()  
         a_pi = self.model.pi(z_detached.reshape(B*H, -1)).view(B, H, -1)
         q_pi = self.model.q.min(z_detached.reshape(B*H, -1), a_pi.reshape(B*H, -1)).view(B, H)
-        # maximize weighted q => minimize -q
+
         pi_loss = - (t_w * q_pi).mean()
 
         self.pi_optimizer.zero_grad(set_to_none=True)

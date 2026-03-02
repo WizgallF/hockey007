@@ -3,7 +3,7 @@ import seaborn as sns
 import os
 import yaml
 import matplotlib.pyplot as plt
-#from tueplots import bundles
+from tueplots import bundles
 
 SAGE_GREEN = "#5a8840"
 STORMY_TEAL = "#246A73"
@@ -15,7 +15,10 @@ RUBY_RED = "#A31621"
 def plot_rewards(
         raw_data_path,
         env_name = "Hockey-One-v0",
-        opponent_name = "weak opponent"):
+        opponent_name = "strong opponent"):
+    """
+    Plotting utilitiy for Pendulum and Hockey
+    """
     
     config_path = os.path.join(raw_data_path, "config.yaml")
     with open(config_path, "r") as f:
@@ -32,7 +35,7 @@ def plot_rewards(
     elif model_identifier == "ddpg":
         mv_average_color = STORMY_TEAL
     elif model_identifier == "tdmpc2":
-        mv_average_color = RUBY_RED
+        mv_average_color == RUBY_RED
     else:
         raise NotImplementedError
     
@@ -78,17 +81,17 @@ def plot_rewards(
     ax.set_xlabel("Episode Number")
     ax.set_xlim(left=0, right=episodes_n)
     if env_name == "Hockey-One-v0":
-        ax.set_xticks(ticks=np.arange(0, episodes_n, 5000))
-        ax.set_xticks(ticks=np.arange(0, episodes_n, 1000), minor=True)
+        ax.set_xticks(ticks=np.arange(0, episodes_n, 1000))
+        ax.set_xticks(ticks=np.arange(0, episodes_n, 200), minor=True)
     else:
-        ax.set_xticks(ticks=np.arange(0, episodes_n, 100))
-        ax.set_xticks(ticks=np.arange(0, episodes_n, 20), minor=True)
+        ax.set_xticks(ticks=np.arange(0, episodes_n, 2500))
+        ax.set_xticks(ticks=np.arange(0, episodes_n, 500), minor=True)
     
     # --- customize y-axis ---
     ax.set_ylabel("Rewards per Episode")
     current_ticks = list(ax.get_yticks())
     
-    current_ticks = [int(t) for t in current_ticks if abs(t - mv_avg_rewards_max) > (mv_avg_rewards_max * 0.05)]
+    current_ticks = [int(t) for t in current_ticks if abs(t - mv_avg_rewards_max) > (mv_avg_rewards_max * 0.1)]
     combined_ticks = sorted(current_ticks + [mv_avg_rewards_max])
     combined_ticks = combined_ticks[:-1]
     
@@ -118,7 +121,8 @@ def plot_rewards(
 if __name__ == "__main__":
 
     plot_rewards(
-        raw_data_path="/Users/georgtirpitz/Library/CloudStorage/OneDrive-Persönlich/Uni/Master/ReinfrocementLearning/hockey007/experiments/tdmpc2_adam_weak",
-        env_name = "Hockey-One-v0" 
+        raw_data_path="/home/nils-klute/Documents/machine_learning/Reinforcement Learning/hockey007/experiments_ddpg/2026-02-26_18-34-59_ddpg strong",
+        env_name = "Hockey-One-v0", # "Pendulum-v1",
+        opponent_name="strong opponent"
         )
     

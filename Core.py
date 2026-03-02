@@ -12,8 +12,11 @@ from gymnasium import spaces
 
 
 class Core:
-    def load_agent(self):
-        pass
+    """
+    Basic functionality for the project library. Includes agent training in 
+    the Pendulum and Hockey Environment, agent self play, hockey gameplay against 
+    strong/weak opponent.
+    """
 
     
     def train_agent(
@@ -88,15 +91,9 @@ class Core:
         else:
             raise NotImplementedError
         
-
-        
         train_class = Training(agent, env, base_dir, save_intermediate_agents, verbose, weak, env_name)
         train_class.train()
 
-    
-
-    def evaluate(self):
-        pass
 
     def train_agent_self_play(
             self, 
@@ -114,12 +111,14 @@ class Core:
             
         if env_name == "Hockey-One-v0":
             env = h_env.HockeyEnv()
+
             if agent_name == "rainbow":
                 proxy_env = DiscreteActionWrapperHockey(env)
                 n_actions = proxy_env.action_space.n
                 state, info = proxy_env.reset()
                 n_observations = len(state)
                 single_player_action_space = None
+
             elif agent_name == "ddpg":
                 state, info = env.reset()
                 n_observations = len(state)
@@ -128,12 +127,7 @@ class Core:
                     high=env.action_space.high[:4],
                     dtype=env.action_space.dtype,
                 )
-            else:
-                raise NotImplementedError
-        else:
-            raise NotImplementedError
 
-    
         if agent_name == "rainbow": 
             agent = RainbowAgent(
                 n_observations=n_observations,
@@ -142,6 +136,7 @@ class Core:
                 eval_mode=False)
             if agent_load_path is not None:
                 agent.load_dict(agent_load_path)
+
         elif agent_name == "ddpg":
             agent = DDPGAgent(
                 env.observation_space,
@@ -150,10 +145,6 @@ class Core:
             )
             if agent_load_path is not None:
                 agent.load_dict(agent_load_path)
-
-        else:
-            raise NotImplementedError
-        
 
         
         train_class = Training(agent, env, base_dir, save_intermediate_agents, verbose)
@@ -165,6 +156,7 @@ class Core:
             agent_load_path=agent_load_path,
             population_path=population_path,
             num_parallel_envs=num_parallel_envs)
+
 
     def exploit_agent(
             self, 
@@ -182,12 +174,14 @@ class Core:
             
         if env_name == "Hockey-One-v0":
             env = h_env.HockeyEnv()
+
             if agent_name == "rainbow":
                 proxy_env = DiscreteActionWrapperHockey(env)
                 n_actions = proxy_env.action_space.n
                 state, info = proxy_env.reset()
                 n_observations = len(state)
                 single_player_action_space = None
+
             elif agent_name == "ddpg":
                 state, info = env.reset()
                 n_observations = len(state)
@@ -210,6 +204,7 @@ class Core:
                 eval_mode=False)
             if agent_load_path is not None:
                 agent.load_dict(agent_load_path)
+
         elif agent_name == "ddpg":
             agent = DDPGAgent(
                 env.observation_space,
@@ -233,10 +228,7 @@ class Core:
             agent_load_path=agent_load_path,
             population_path=population_path,
             num_parallel_envs=num_parallel_envs)
-
-    def agent_against_human(self):
-        pass
-
+        
 
     def play(
             self,
@@ -300,6 +292,7 @@ class Core:
             player_id: int, 
             agent_path: str = None, 
             config_path: str = None):
+        
         if isinstance(player, str):
             key = player.lower()
             if key in {"human", "humanopponent"}:
