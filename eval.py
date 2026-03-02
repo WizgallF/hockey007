@@ -263,6 +263,7 @@ def evaluate_single_agent_against_pool(
 
         winrate_stats[agent_file_name]= [mean_winrate, std_winrate]
 
+        agent_file_name = agent_file_name.split(".")[0]
         aw_dataframe =pd.DataFrame(winrate_stats)
         aw_dataframe.to_csv(os.path.join(population_path, f"evaluation_of {agent_file_name}.csv"))
 
@@ -431,10 +432,10 @@ def discrete_to_continuous(discrete_action):
 
 if __name__ == "__main__":
 
-    num_episodes = 2000
+    num_episodes = 100
     evaluate_single_agent_against_pool(
           population_path="/home/stud217/hockey007/self_play_opponent_pool",
-          agent_file_name="ddpg_opponent.pth",
+          agent_file_name="tdmpc2_non_parallel.pth",
           num_episodes=num_episodes
     )
     
