@@ -5,7 +5,17 @@ import torch.nn.functional as F
 
 
 class RainbowNetwork(nn.Module):
-    def __init__(self, observation_size, action_size, device, dueling = True, noisy=True, distributional_q = True, n_atoms=201, sigma0=0.5):
+    def __init__(
+            self, 
+            observation_size, 
+            action_size, 
+            device, dueling = True, 
+            noisy=True, 
+            distributional_q = True, 
+            n_atoms=201, 
+            sigma0=0.5,
+            hidden_1_dim = 128,
+            hidden_2_dim = 128):
         """ Create RainbowNetwork
         Parameters
         ----------
@@ -25,11 +35,6 @@ class RainbowNetwork(nn.Module):
         self.sigma0 = sigma0
 
         self.n_atoms = n_atoms if self.distributional_q else 1
-
-        
-        # MLP
-        hidden_1_dim = 128
-        hidden_2_dim = 128
 
         
         #  noisy net linear layers 

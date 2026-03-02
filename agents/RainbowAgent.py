@@ -42,8 +42,8 @@ class RainbowAgent(Agent):
 
         # ------ initialize neural networks ------
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.policy_net = RainbowNetwork(n_observations, n_actions, self.device, self.DUELING, self.NOISY, self.DISTRIBUTIONAL_Q, n_atoms=self.N_ATOMS, sigma0=self.SIGMA0).to(self.device)
-        self.target_net = RainbowNetwork(n_observations, n_actions, self.device, self.DUELING, self.NOISY, self.DISTRIBUTIONAL_Q, n_atoms=self.N_ATOMS, sigma0=self.SIGMA0).to(self.device)
+        self.policy_net = RainbowNetwork(n_observations, n_actions, self.device, self.DUELING, self.NOISY, self.DISTRIBUTIONAL_Q, n_atoms=self.N_ATOMS, sigma0=self.SIGMA0, hidden_1_dim=self.HIDDEN_1_DIM, hidden_2_dim=self.HIDDEN_2_DIM).to(self.device)
+        self.target_net = RainbowNetwork(n_observations, n_actions, self.device, self.DUELING, self.NOISY, self.DISTRIBUTIONAL_Q, n_atoms=self.N_ATOMS, sigma0=self.SIGMA0, hidden_1_dim=self.HIDDEN_1_DIM, hidden_2_dim=self.HIDDEN_2_DIM).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.cur_episode = 0
 

@@ -21,7 +21,7 @@ def main ():
     parser.add_argument ( '--train_against_weak', default=False, action="store_true", help="Train against the weak opponent" )
 
     parser.add_argument ( '--playagent_1_type', type=str, default="ddpg", help = "Specify the agent 1 to use for evaluation")
-    parser.add_argument ( '--playagent1_path', type=str, default="/home/nils-klute/Documents/machine_learning/Reinforcement Learning/hockey007/experiments_ddpg/2026-02-26_18-35-18_ddpg weak/ddpg.pth", help = "Path to the trained agent 1 for evaluation")
+    parser.add_argument ( '--playagent1_path', type=str, default=None, help = "Path to the trained agent 1 for evaluation")
     parser.add_argument ( '--playagent1_config', type=str, default="/home/nils-klute/Documents/machine_learning/Reinforcement Learning/hockey007/experiments_ddpg/2026-02-26_18-35-18_ddpg weak/config.yaml", help = "Path to the config file for agent 1 (only for evaluation)")
 
     parser.add_argument ( '--playagent_2_type', type=str, default="weakopp", help = "Specify the agent 2 to use for evaluation")

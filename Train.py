@@ -434,14 +434,14 @@ class Training():
             
             
 
-        self.save_data()
-        self.save_performance_against_basic_opp()
+            self.save_data()
+            self.save_performance_against_basic_opp()
 
-        if self.fixed_opponents:
-            self.save_performance_against_fixed_pool()
+            if self.fixed_opponents:
+                self.save_performance_against_fixed_pool()
 
-        if type(self.agent) == RainbowAgent:
-            self.save_q_values()
+            if type(self.agent) == RainbowAgent:
+                self.save_q_values()
 
         if not self.fixed_opponents:
             eval_results = self.evaluate_agents(population_path)

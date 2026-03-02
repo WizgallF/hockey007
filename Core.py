@@ -151,9 +151,7 @@ class Core:
         discrete_actions = agent_name == "rainbow"
         
         train_class.train_self_play(
-            opponent=agent, 
             discrete_actions=discrete_actions, 
-            agent_load_path=agent_load_path,
             population_path=population_path,
             num_parallel_envs=num_parallel_envs)
 
