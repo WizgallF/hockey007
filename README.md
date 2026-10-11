@@ -175,7 +175,7 @@ inference, which limited its pool training.
 ## Presentation and report
 
 <!-- TODO: add presentation video and report -->
-- [Presentation video](assets/presentation.mp4): a short walk through the three algorithms, with gameplay.
+- [Presentation video](https://drive.google.com/file/d/1SqB2sENRN4CMukrTfwSxAZRIUVHjl3gJ/view?usp=drive_link): a short walk through the three algorithms, with gameplay.
 - [Technical report (PDF)](assets/report.pdf): methods, tuning and full results.
 
 ## Acknowledgements
